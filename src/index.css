@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #6C5CE7;
+  --color-primary-dark: #5A4BD1;
+  --color-primary-light: #A29BFE;
+  --color-accent: #00CEC9;
+  --color-accent-dark: #00B5B0;
+  --color-surface: #1E1E2E;
+  --color-surface-light: #2A2A3E;
+  --color-surface-lighter: #363650;
+  --color-danger: #FF6B6B;
+  --color-warning: #FDCB6E;
+  --color-success: #00B894;
+  --color-gold: #FFD700;
+  --color-silver: #C0C0C0;
+  --color-bronze: #CD7F32;
+}
+
+body {
+  margin: 0;
+  background-color: #13131F;
+  color: #E2E2F0;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-surface);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-lighter);
+  border-radius: 3px;
+}
+
+.game-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.game-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(108, 92, 231, 0.3);
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, #6C5CE7, #00CEC9);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.glass {
+  background: rgba(30, 30, 46, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(108, 92, 231, 0.3); }
+  50% { box-shadow: 0 0 40px rgba(108, 92, 231, 0.6); }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
