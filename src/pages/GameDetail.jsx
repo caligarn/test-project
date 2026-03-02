@@ -8,7 +8,7 @@ import {
   Star,
   Lock,
 } from 'lucide-react'
-import { getGame, GAME_COMPONENTS } from '../lib/gameData'
+import { getGame } from '../lib/gameData'
 import { getLeaderboard } from '../lib/storage'
 import { useAuth } from '../context/AuthContext'
 
