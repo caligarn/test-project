@@ -12,6 +12,7 @@ export const GAMES = [
     players: '1,247',
     featured: true,
     isNew: false,
+    pointsPerAction: 100,
   },
   {
     id: 'pixel-duel',
@@ -25,7 +26,8 @@ export const GAMES = [
     difficulty: 'Hard',
     players: '892',
     featured: true,
-    isNew: true,
+    isNew: false,
+    pointsPerAction: 150,
   },
   {
     id: 'style-roulette',
@@ -40,6 +42,7 @@ export const GAMES = [
     players: '2,103',
     featured: false,
     isNew: false,
+    pointsPerAction: 75,
   },
   {
     id: 'speed-prompt',
@@ -54,6 +57,7 @@ export const GAMES = [
     players: '1,567',
     featured: true,
     isNew: false,
+    pointsPerAction: 120,
   },
   {
     id: 'dream-caption',
@@ -68,6 +72,7 @@ export const GAMES = [
     players: '3,421',
     featured: false,
     isNew: false,
+    pointsPerAction: 90,
   },
   {
     id: 'ai-remix',
@@ -81,38 +86,17 @@ export const GAMES = [
     difficulty: 'Hard',
     players: '678',
     featured: false,
-    isNew: true,
+    isNew: false,
+    pointsPerAction: 130,
   },
 ]
 
-export const CATEGORIES = [
-  { id: 'all', label: 'All Games', icon: '🎮' },
-  { id: 'puzzle', label: 'Puzzle', icon: '🧩' },
-  { id: 'creative', label: 'Creative', icon: '🎨' },
-  { id: 'trivia', label: 'Trivia', icon: '❓' },
-  { id: 'speed', label: 'Speed', icon: '⚡' },
-]
-
-export function getGame(id) {
-  return GAMES.find((g) => g.id === id)
-}
-
-export function getGamesByCategory(category) {
-  if (category === 'all') return GAMES
-  return GAMES.filter((g) => g.category === category)
-}
-
-export function getFeaturedGames() {
-  return GAMES.filter((g) => g.featured)
-}
-
-// New minigames added from standalone apps
 export const MINIGAMES = [
   {
     id: 'infinimap',
     title: 'Infini-Map',
     tagline: 'Paint the infinite canvas',
-    description: 'Click any tile on an infinite canvas to generate AI imagery. Each tile blends with its neighbors for a seamless world. How many tiles can you fill?',
+    description: 'Click any tile on an infinite canvas to generate AI imagery. Each tile you fill earns points and builds a world one prompt at a time.',
     icon: '🗺️',
     color: '#1E1B4B',
     bgClass: 'bg-[#1E1B4B]',
@@ -129,8 +113,8 @@ export const MINIGAMES = [
     tagline: 'Turn poetry into art',
     description: 'Write a haiku following the 5-7-5 syllable pattern and watch AI transform your words into stunning artwork. Build a collaborative poetry gallery!',
     icon: '🌸',
-    color: '#0F172A',
-    bgClass: 'bg-[#0F172A]',
+    color: '#831843',
+    bgClass: 'bg-[#831843]',
     category: 'creative',
     difficulty: 'Easy',
     players: '0',
@@ -144,8 +128,8 @@ export const MINIGAMES = [
     tagline: 'Build the collaborative mosaic',
     description: 'Create AI-generated mosaic pieces that join together into a larger collaborative artwork. Each piece you add earns points and shapes the collective canvas.',
     icon: '🧩',
-    color: '#1F2937',
-    bgClass: 'bg-[#1F2937]',
+    color: '#064E3B',
+    bgClass: 'bg-[#064E3B]',
     category: 'creative',
     difficulty: 'Easy',
     players: '0',
@@ -153,19 +137,47 @@ export const MINIGAMES = [
     isNew: true,
     pointsPerAction: 60,
   },
+  {
+    id: 'community-comic',
+    title: 'Community Comic',
+    tagline: 'Write the next panel',
+    description: 'Add a panel to a collaborative comic strip. Write dialogue or scene descriptions and AI illustrates it in comic book style. Everyone writes the story.',
+    icon: '📖',
+    color: '#1C1917',
+    bgClass: 'bg-[#1C1917]',
+    category: 'creative',
+    difficulty: 'Easy',
+    players: '0',
+    featured: true,
+    isNew: true,
+    pointsPerAction: 80,
+  },
 ]
 
 export const ALL_GAMES = [...GAMES, ...MINIGAMES]
 
-export function getAllGames() {
-  return ALL_GAMES
+export const CATEGORIES = [
+  { id: 'all', label: 'All Games', icon: '🎮' },
+  { id: 'puzzle', label: 'Puzzle', icon: '🧩' },
+  { id: 'creative', label: 'Creative', icon: '🎨' },
+  { id: 'trivia', label: 'Trivia', icon: '❓' },
+  { id: 'speed', label: 'Speed', icon: '⚡' },
+]
+
+export function getGame(id) {
+  return ALL_GAMES.find((g) => g.id === id) || null
 }
 
-export function getMinigame(id) {
-  return MINIGAMES.find((g) => g.id === id)
-}
-
-export function getAllGamesByCategory(category) {
+export function getGamesByCategory(category) {
   if (category === 'all') return ALL_GAMES
   return ALL_GAMES.filter((g) => g.category === category)
 }
+
+export function getFeaturedGames() {
+  return ALL_GAMES.filter((g) => g.featured)
+}
+
+// Legacy aliases
+export const getAllGames = () => ALL_GAMES
+export const getMinigame = (id) => MINIGAMES.find((g) => g.id === id)
+export const getAllGamesByCategory = getGamesByCategory
