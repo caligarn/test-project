@@ -1,0 +1,144 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #FF2D55;
+  --color-primary-dark: #E5264C;
+  --color-primary-light: #FF6B8A;
+  --color-accent: #C8FF00;
+  --color-accent-dark: #B3E600;
+  --color-highlight: #FFD600;
+  --color-navy: #1A1A2E;
+  --color-surface: #FFFFFF;
+  --color-surface-light: #F5F0E1;
+  --color-surface-lighter: #EBE6D6;
+  --color-danger: #FF3B30;
+  --color-warning: #FF9500;
+  --color-success: #34C759;
+  --color-gold: #FFD700;
+  --color-silver: #A8A8A8;
+  --color-bronze: #CD7F32;
+}
+
+body {
+  margin: 0;
+  background-color: #FFF8E7;
+  color: #1A1A2E;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F5F0E1;
+}
+::-webkit-scrollbar-thumb {
+  background: #C8C2B0;
+  border-radius: 3px;
+}
+
+.game-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  border: 3px solid #1A1A2E;
+}
+.game-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0px #1A1A2E;
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, #FF2D55, #C8FF00);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.brutalist-card {
+  background: #FFFFFF;
+  border: 3px solid #1A1A2E;
+  box-shadow: 4px 4px 0px #1A1A2E;
+}
+
+.brutalist-card-pink {
+  background: #FF2D55;
+  border: 3px solid #1A1A2E;
+  box-shadow: 4px 4px 0px #FFD600;
+  color: white;
+}
+
+.brutalist-card-green {
+  background: #C8FF00;
+  border: 3px solid #1A1A2E;
+  box-shadow: 4px 4px 0px #1A1A2E;
+  color: #1A1A2E;
+}
+
+.brutalist-card-yellow {
+  background: #FFD600;
+  border: 3px solid #1A1A2E;
+  box-shadow: 4px 4px 0px #1A1A2E;
+  color: #1A1A2E;
+}
+
+.tag {
+  display: inline-block;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 2px solid #1A1A2E;
+}
+
+.tag-pink {
+  background: #FF2D55;
+  color: white;
+}
+
+.tag-green {
+  background: #C8FF00;
+  color: #1A1A2E;
+}
+
+.tag-yellow {
+  background: #FFD600;
+  color: #1A1A2E;
+}
+
+.btn-brutalist {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+  border: 3px solid #1A1A2E;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.btn-brutalist:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 4px 4px 0px #1A1A2E;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 4px 4px 0px #1A1A2E; }
+  50% { box-shadow: 6px 6px 0px #FF2D55; }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
