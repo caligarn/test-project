@@ -105,3 +105,67 @@ export function getGamesByCategory(category) {
 export function getFeaturedGames() {
   return GAMES.filter((g) => g.featured)
 }
+
+// New minigames added from standalone apps
+export const MINIGAMES = [
+  {
+    id: 'infinimap',
+    title: 'Infini-Map',
+    tagline: 'Paint the infinite canvas',
+    description: 'Click any tile on an infinite canvas to generate AI imagery. Each tile blends with its neighbors for a seamless world. How many tiles can you fill?',
+    icon: '🗺️',
+    color: '#1E1B4B',
+    bgClass: 'bg-[#1E1B4B]',
+    category: 'creative',
+    difficulty: 'Easy',
+    players: '0',
+    featured: true,
+    isNew: true,
+    pointsPerAction: 50,
+  },
+  {
+    id: 'haiku-canvas',
+    title: 'Haiku Canvas',
+    tagline: 'Turn poetry into art',
+    description: 'Write a haiku following the 5-7-5 syllable pattern and watch AI transform your words into stunning artwork. Build a collaborative poetry gallery!',
+    icon: '🌸',
+    color: '#0F172A',
+    bgClass: 'bg-[#0F172A]',
+    category: 'creative',
+    difficulty: 'Easy',
+    players: '0',
+    featured: true,
+    isNew: true,
+    pointsPerAction: 75,
+  },
+  {
+    id: 'mosaic-maker',
+    title: 'Mosaic Maker',
+    tagline: 'Build the collaborative mosaic',
+    description: 'Create AI-generated mosaic pieces that join together into a larger collaborative artwork. Each piece you add earns points and shapes the collective canvas.',
+    icon: '🧩',
+    color: '#1F2937',
+    bgClass: 'bg-[#1F2937]',
+    category: 'creative',
+    difficulty: 'Easy',
+    players: '0',
+    featured: false,
+    isNew: true,
+    pointsPerAction: 60,
+  },
+]
+
+export const ALL_GAMES = [...GAMES, ...MINIGAMES]
+
+export function getAllGames() {
+  return ALL_GAMES
+}
+
+export function getMinigame(id) {
+  return MINIGAMES.find((g) => g.id === id)
+}
+
+export function getAllGamesByCategory(category) {
+  if (category === 'all') return ALL_GAMES
+  return ALL_GAMES.filter((g) => g.category === category)
+}
