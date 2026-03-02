@@ -10,27 +10,27 @@ export default function AdBanner() {
   if (subscribed || dismissed) return null
 
   return (
-    <div className="relative bg-surface-light border border-white/5 rounded-xl p-4 mb-6">
+    <div className="relative brutalist-card-yellow p-4 mb-6">
       <button
         onClick={() => setDismissed(true)}
-        className="absolute top-2 right-2 p-1 text-gray-500 hover:text-gray-300 transition-colors"
+        className="absolute top-2 right-2 p-1 text-navy/50 hover:text-navy transition-colors"
       >
         <X className="w-4 h-4" />
       </button>
       <div className="flex items-center gap-4">
-        <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-warning/20 to-warning/5 flex items-center justify-center shrink-0">
-          <Crown className="w-8 h-8 text-warning" />
+        <div className="w-16 h-16 bg-navy flex items-center justify-center shrink-0 border-2 border-navy">
+          <Crown className="w-8 h-8 text-highlight" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white mb-0.5">
+          <p className="text-sm font-black text-navy mb-0.5 uppercase">
             Go Ad-Free with AI Arcade Pro
           </p>
-          <p className="text-xs text-gray-400 mb-2">
+          <p className="text-xs text-navy/70 mb-2 font-medium">
             Unlimited games, exclusive content, and no interruptions.
           </p>
           <Link
             to="/subscribe"
-            className="inline-block px-3 py-1 rounded-lg bg-warning/20 text-warning text-xs font-medium hover:bg-warning/30 transition-colors no-underline"
+            className="btn-brutalist bg-navy text-highlight text-xs no-underline"
           >
             Upgrade Now
           </Link>

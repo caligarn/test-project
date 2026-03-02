@@ -17,13 +17,13 @@ export default function PlayGame() {
     return (
       <div className="max-w-md mx-auto px-4 py-16 text-center">
         <p className="text-4xl mb-4">🔒</p>
-        <p className="text-white font-bold text-lg mb-2">Sign in Required</p>
-        <p className="text-gray-400 text-sm mb-4">
+        <p className="text-navy font-black text-lg mb-2 uppercase">Sign in Required</p>
+        <p className="text-navy/50 text-sm mb-4 font-medium">
           You need to be signed in to play games.
         </p>
         <Link
           to="/login"
-          className="inline-block px-5 py-2.5 rounded-xl bg-primary text-white font-medium text-sm no-underline"
+          className="btn-brutalist bg-primary text-white no-underline inline-flex"
         >
           Sign In
         </Link>
@@ -35,7 +35,7 @@ export default function PlayGame() {
     return (
       <div className="max-w-md mx-auto px-4 py-16 text-center">
         <p className="text-4xl mb-4">🎮</p>
-        <p className="text-gray-400">Game not found.</p>
+        <p className="text-navy/50 font-medium">Game not found.</p>
       </div>
     )
   }
@@ -53,20 +53,20 @@ export default function PlayGame() {
       <div className="max-w-md mx-auto px-4 py-12">
         <button
           onClick={() => navigate(-1)}
-          className="flex items-center gap-1.5 text-gray-400 hover:text-white text-sm mb-6 transition-colors"
+          className="flex items-center gap-1.5 text-navy/50 hover:text-navy text-sm font-bold mb-6 transition-colors uppercase"
         >
           <ArrowLeft className="w-4 h-4" />
           Back
         </button>
 
-        <div className="bg-surface-light rounded-2xl p-8 border border-white/5 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-primary/20 flex items-center justify-center mx-auto mb-4">
-            <Key className="w-8 h-8 text-primary" />
+        <div className="brutalist-card p-8 text-center">
+          <div className="w-16 h-16 bg-primary flex items-center justify-center mx-auto mb-4 border-2 border-navy">
+            <Key className="w-8 h-8 text-white" />
           </div>
-          <h2 className="text-xl font-bold text-white mb-2">
+          <h2 className="text-xl font-black text-navy mb-2 uppercase">
             Fal.ai API Key Required
           </h2>
-          <p className="text-gray-400 text-sm mb-6">
+          <p className="text-navy/50 text-sm mb-6 font-medium">
             This game uses AI image generation. Enter your Fal.ai API key to
             play. Your key is stored locally and never sent to our servers.
           </p>
@@ -76,57 +76,60 @@ export default function PlayGame() {
               placeholder="Enter your Fal.ai API key..."
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl bg-surface border border-white/10 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-primary/50"
+              className="w-full px-4 py-3 bg-white text-navy text-sm placeholder-navy/30 focus:outline-none focus:ring-2 focus:ring-highlight font-medium"
+              style={{ borderWidth: '3px', borderStyle: 'solid', borderColor: '#1A1A2E' }}
             />
             <button
               type="submit"
-              className="w-full py-3 rounded-xl bg-primary hover:bg-primary-dark text-white font-medium text-sm transition-colors"
+              className="w-full btn-brutalist bg-primary text-white justify-center"
             >
               Save & Continue
             </button>
           </form>
-          <p className="text-gray-500 text-xs mt-4">
+          <p className="text-navy/40 text-xs mt-4 font-medium">
             Get your API key at{' '}
-            <span className="text-primary">fal.ai</span>
+            <span className="text-primary font-bold">fal.ai</span>
           </p>
         </div>
       </div>
     )
   }
 
+  const isLightBg = game.color === '#C8FF00' || game.color === '#FFD600'
+
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
       <div className="flex items-center justify-between mb-6">
         <button
           onClick={() => navigate(-1)}
-          className="flex items-center gap-1.5 text-gray-400 hover:text-white text-sm transition-colors"
+          className="flex items-center gap-1.5 text-navy/50 hover:text-navy text-sm font-bold transition-colors uppercase"
         >
           <ArrowLeft className="w-4 h-4" />
           Back
         </button>
         <div className="flex items-center gap-2">
           <span className="text-xl">{game.icon}</span>
-          <span className="font-bold text-white">{game.title}</span>
+          <span className="font-black text-navy uppercase">{game.title}</span>
         </div>
-        <button className="p-2 rounded-lg bg-surface-light text-gray-400 hover:text-white transition-colors">
+        <button className="p-2 bg-white text-navy border-2 border-navy hover:bg-surface-light transition-colors">
           <Settings className="w-4 h-4" />
         </button>
       </div>
 
       {/* Game Area Placeholder */}
       <div
-        className={`relative rounded-2xl overflow-hidden bg-gradient-to-br ${game.gradient} min-h-[400px] md:min-h-[500px] flex items-center justify-center`}
+        className="relative overflow-hidden min-h-[400px] md:min-h-[500px] flex items-center justify-center border-3"
+        style={{ backgroundColor: game.color, borderWidth: '3px', borderColor: '#1A1A2E' }}
       >
-        <div className="absolute inset-0 bg-black/30" />
         <div className="relative z-10 text-center p-8">
           <span className="text-6xl mb-6 block animate-float">{game.icon}</span>
-          <h2 className="text-2xl font-bold text-white mb-3">{game.title}</h2>
-          <p className="text-white/70 text-sm max-w-md mx-auto mb-6">
+          <h2 className={`text-2xl font-black ${isLightBg ? 'text-navy' : 'text-white'} mb-3 uppercase`}>{game.title}</h2>
+          <p className={`${isLightBg ? 'text-navy/70' : 'text-white/80'} text-sm max-w-md mx-auto mb-6 font-medium`}>
             {game.description}
           </p>
-          <div className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white/20 text-white text-sm font-medium">
-            <span className="w-2 h-2 rounded-full bg-success animate-pulse" />
-            Game ready — implementation coming soon
+          <div className={`inline-flex items-center gap-2 px-6 py-3 ${isLightBg ? 'bg-navy text-white' : 'bg-white text-navy'} text-sm font-black uppercase border-2 border-navy`}>
+            <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+            Game ready — coming soon
           </div>
         </div>
       </div>
@@ -136,7 +139,7 @@ export default function PlayGame() {
         {['Hint', 'Skip', 'Submit'].map((action) => (
           <button
             key={action}
-            className="py-3 rounded-xl bg-surface-light border border-white/5 text-gray-400 text-sm font-medium hover:bg-surface-lighter hover:text-white transition-colors"
+            className="py-3 bg-white text-navy text-sm font-black uppercase hover:bg-surface-light transition-colors border-2 border-navy"
           >
             {action}
           </button>
@@ -144,18 +147,18 @@ export default function PlayGame() {
       </div>
 
       {/* Score Area */}
-      <div className="mt-4 flex items-center justify-between bg-surface-light rounded-xl p-4 border border-white/5">
+      <div className="mt-4 flex items-center justify-between brutalist-card p-4">
         <div>
-          <p className="text-xs text-gray-500">Score</p>
-          <p className="text-2xl font-bold text-white">0</p>
+          <p className="text-xs text-navy/40 font-bold uppercase">Score</p>
+          <p className="text-2xl font-black text-navy">0</p>
         </div>
         <div>
-          <p className="text-xs text-gray-500">Round</p>
-          <p className="text-2xl font-bold text-white">1/5</p>
+          <p className="text-xs text-navy/40 font-bold uppercase">Round</p>
+          <p className="text-2xl font-black text-navy">1/5</p>
         </div>
         <div>
-          <p className="text-xs text-gray-500">Time</p>
-          <p className="text-2xl font-bold text-accent">0:30</p>
+          <p className="text-xs text-navy/40 font-bold uppercase">Time</p>
+          <p className="text-2xl font-black text-primary">0:30</p>
         </div>
       </div>
     </div>

@@ -10,7 +10,7 @@ const NAV_ITEMS = [
 
 export default function BottomNav() {
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 glass z-50 px-2 py-1">
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-navy border-t-4 border-highlight z-50 px-2 py-1">
       <div className="flex items-center justify-around">
         {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
           <NavLink
@@ -18,15 +18,15 @@ export default function BottomNav() {
             to={to}
             end={to === '/'}
             className={({ isActive }) =>
-              `flex flex-col items-center gap-0.5 px-3 py-2 rounded-lg transition-colors no-underline ${
+              `flex flex-col items-center gap-0.5 px-3 py-2 transition-colors no-underline ${
                 isActive
-                  ? 'text-primary'
-                  : 'text-gray-500 hover:text-gray-300'
+                  ? 'text-highlight'
+                  : 'text-white/50 hover:text-white/80'
               }`
             }
           >
             <Icon className="w-5 h-5" />
-            <span className="text-[10px] font-medium">{label}</span>
+            <span className="text-[10px] font-bold uppercase">{label}</span>
           </NavLink>
         ))}
       </div>

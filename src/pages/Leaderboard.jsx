@@ -13,7 +13,6 @@ export default function Leaderboard() {
     selectedGame === 'all' ? null : selectedGame
   )
 
-  // Demo data if empty
   const displayData =
     leaderboard.length > 0
       ? leaderboard
@@ -22,11 +21,11 @@ export default function Leaderboard() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-          <Trophy className="w-6 h-6 text-warning" />
+        <h1 className="text-2xl font-black text-navy flex items-center gap-2 uppercase">
+          <Trophy className="w-6 h-6 text-highlight" />
           Leaderboard
         </h1>
-        <p className="text-gray-400 text-sm mt-1">
+        <p className="text-navy/50 text-sm mt-1 font-medium">
           Top players across all AI Arcade games
         </p>
       </div>
@@ -35,10 +34,10 @@ export default function Leaderboard() {
       <div className="flex items-center gap-2 overflow-x-auto pb-2 mb-6">
         <button
           onClick={() => setSelectedGame('all')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+          className={`px-3 py-1.5 text-xs font-black whitespace-nowrap transition-colors uppercase border-2 border-navy ${
             selectedGame === 'all'
-              ? 'bg-primary text-white'
-              : 'bg-surface-light text-gray-400 hover:text-white'
+              ? 'bg-navy text-white'
+              : 'bg-white text-navy hover:bg-surface-light'
           }`}
         >
           Overall
@@ -47,10 +46,10 @@ export default function Leaderboard() {
           <button
             key={game.id}
             onClick={() => setSelectedGame(game.id)}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+            className={`flex items-center gap-1 px-3 py-1.5 text-xs font-black whitespace-nowrap transition-colors uppercase border-2 border-navy ${
               selectedGame === game.id
-                ? 'bg-primary text-white'
-                : 'bg-surface-light text-gray-400 hover:text-white'
+                ? 'bg-navy text-white'
+                : 'bg-white text-navy hover:bg-surface-light'
             }`}
           >
             <span>{game.icon}</span>
@@ -64,15 +63,15 @@ export default function Leaderboard() {
         <div className="flex items-end justify-center gap-3 mb-8">
           {/* 2nd Place */}
           <div className="flex flex-col items-center">
-            <div className="w-14 h-14 rounded-full bg-surface-lighter flex items-center justify-center text-2xl mb-2 border-2 border-silver">
+            <div className="w-14 h-14 bg-surface-light flex items-center justify-center text-2xl mb-2 border-3" style={{ borderWidth: '3px', borderColor: '#A8A8A8' }}>
               {displayData[1].avatar || '👾'}
             </div>
-            <p className="text-white text-xs font-medium truncate max-w-[80px]">
+            <p className="text-navy text-xs font-bold truncate max-w-[80px]">
               {displayData[1].username}
             </p>
-            <div className="mt-2 w-20 h-20 rounded-t-xl bg-silver/20 flex flex-col items-center justify-center">
+            <div className="mt-2 w-20 h-20 bg-silver/20 flex flex-col items-center justify-center border-2 border-navy/20">
               <Medal className="w-5 h-5 text-silver mb-1" />
-              <span className="text-silver text-sm font-bold">
+              <span className="text-silver text-sm font-black">
                 {displayData[1].score}
               </span>
             </div>
@@ -80,15 +79,15 @@ export default function Leaderboard() {
 
           {/* 1st Place */}
           <div className="flex flex-col items-center">
-            <div className="w-16 h-16 rounded-full bg-surface-lighter flex items-center justify-center text-3xl mb-2 border-2 border-gold pulse-glow">
+            <div className="w-16 h-16 bg-highlight flex items-center justify-center text-3xl mb-2 border-3 pulse-glow" style={{ borderWidth: '3px', borderColor: '#1A1A2E' }}>
               {displayData[0].avatar || '🤖'}
             </div>
-            <p className="text-white text-sm font-bold truncate max-w-[80px]">
+            <p className="text-navy text-sm font-black truncate max-w-[80px]">
               {displayData[0].username}
             </p>
-            <div className="mt-2 w-24 h-28 rounded-t-xl bg-gold/20 flex flex-col items-center justify-center">
+            <div className="mt-2 w-24 h-28 bg-highlight/20 flex flex-col items-center justify-center border-2 border-navy/20">
               <Trophy className="w-6 h-6 text-gold mb-1" />
-              <span className="text-gold text-lg font-bold">
+              <span className="text-gold text-lg font-black">
                 {displayData[0].score}
               </span>
             </div>
@@ -96,15 +95,15 @@ export default function Leaderboard() {
 
           {/* 3rd Place */}
           <div className="flex flex-col items-center">
-            <div className="w-14 h-14 rounded-full bg-surface-lighter flex items-center justify-center text-2xl mb-2 border-2 border-bronze">
+            <div className="w-14 h-14 bg-surface-light flex items-center justify-center text-2xl mb-2 border-3" style={{ borderWidth: '3px', borderColor: '#CD7F32' }}>
               {displayData[2].avatar || '🎮'}
             </div>
-            <p className="text-white text-xs font-medium truncate max-w-[80px]">
+            <p className="text-navy text-xs font-bold truncate max-w-[80px]">
               {displayData[2].username}
             </p>
-            <div className="mt-2 w-20 h-16 rounded-t-xl bg-bronze/20 flex flex-col items-center justify-center">
+            <div className="mt-2 w-20 h-16 bg-bronze/20 flex flex-col items-center justify-center border-2 border-navy/20">
               <Medal className="w-5 h-5 text-bronze mb-1" />
-              <span className="text-bronze text-sm font-bold">
+              <span className="text-bronze text-sm font-black">
                 {displayData[2].score}
               </span>
             </div>
@@ -113,40 +112,40 @@ export default function Leaderboard() {
       )}
 
       {/* Full List */}
-      <div className="bg-surface-light rounded-xl border border-white/5 overflow-hidden">
+      <div className="brutalist-card overflow-hidden">
         {displayData.map((entry, i) => (
           <div
             key={entry.username}
-            className="flex items-center gap-3 px-4 py-3 border-b border-white/5 last:border-0 hover:bg-surface-lighter/50 transition-colors"
+            className="flex items-center gap-3 px-4 py-3 border-b-2 border-navy/10 last:border-0 hover:bg-surface-light/50 transition-colors"
           >
             <span
-              className={`w-8 text-center text-sm font-bold ${
+              className={`w-8 text-center text-sm font-black ${
                 i === 0
                   ? 'text-gold'
                   : i === 1
                   ? 'text-silver'
                   : i === 2
                   ? 'text-bronze'
-                  : 'text-gray-500'
+                  : 'text-navy/30'
               }`}
             >
               #{i + 1}
             </span>
             <span className="text-lg">{entry.avatar || '🤖'}</span>
             <div className="flex-1 min-w-0">
-              <p className="text-white text-sm font-medium truncate">
+              <p className="text-navy text-sm font-bold truncate">
                 {entry.username}
               </p>
               {entry.gamesPlayed && (
-                <p className="text-gray-500 text-xs">
+                <p className="text-navy/40 text-xs font-medium">
                   {entry.gamesPlayed} games played
                 </p>
               )}
             </div>
             <div className="text-right">
-              <p className="text-primary font-bold text-sm">{entry.score}</p>
+              <p className="text-primary font-black text-sm">{entry.score}</p>
               {i < 3 && (
-                <div className="flex items-center gap-0.5 text-success text-xs">
+                <div className="flex items-center gap-0.5 text-success text-xs font-bold">
                   <TrendingUp className="w-3 h-3" />
                   Top {i + 1}
                 </div>
@@ -156,8 +155,8 @@ export default function Leaderboard() {
         ))}
         {displayData.length === 0 && (
           <div className="py-12 text-center">
-            <Trophy className="w-10 h-10 text-gray-600 mx-auto mb-3" />
-            <p className="text-gray-400 text-sm">
+            <Trophy className="w-10 h-10 text-navy/20 mx-auto mb-3" />
+            <p className="text-navy/50 text-sm font-medium">
               No scores yet. Start playing to claim the top spot!
             </p>
           </div>

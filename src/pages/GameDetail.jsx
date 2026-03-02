@@ -23,10 +23,10 @@ export default function GameDetail() {
     return (
       <div className="max-w-6xl mx-auto px-4 py-16 text-center">
         <p className="text-4xl mb-4">🎮</p>
-        <p className="text-gray-400">Game not found.</p>
+        <p className="text-navy/60 font-medium">Game not found.</p>
         <Link
           to="/"
-          className="inline-block mt-4 text-primary text-sm no-underline"
+          className="inline-block mt-4 text-primary text-sm font-bold no-underline uppercase"
         >
           Back to Games
         </Link>
@@ -34,6 +34,7 @@ export default function GameDetail() {
     )
   }
 
+  const isLightBg = game.color === '#C8FF00' || game.color === '#FFD600'
   const SAMPLE_SCREENSHOTS = [1, 2, 3]
 
   return (
@@ -41,7 +42,7 @@ export default function GameDetail() {
       {/* Back */}
       <button
         onClick={() => navigate(-1)}
-        className="flex items-center gap-1.5 text-gray-400 hover:text-white text-sm mb-4 transition-colors"
+        className="flex items-center gap-1.5 text-navy/50 hover:text-navy text-sm font-bold mb-4 transition-colors uppercase"
       >
         <ArrowLeft className="w-4 h-4" />
         Back
@@ -49,42 +50,38 @@ export default function GameDetail() {
 
       {/* Hero */}
       <div
-        className={`relative rounded-2xl overflow-hidden bg-gradient-to-br ${game.gradient} p-8 md:p-12 mb-6`}
+        className="relative overflow-hidden p-8 md:p-12 mb-6 border-3"
+        style={{ backgroundColor: game.color, borderWidth: '3px', borderColor: '#1A1A2E' }}
       >
-        <div className="absolute top-0 right-0 w-48 h-48 rounded-full bg-white/10 -translate-y-1/2 translate-x-1/2" />
-        <div className="absolute bottom-0 left-0 w-32 h-32 rounded-full bg-white/5 translate-y-1/2 -translate-x-1/2" />
-
         <div className="relative z-10">
           <span className="text-5xl md:text-6xl mb-4 block">{game.icon}</span>
           <div className="flex items-center gap-2 mb-2">
             {game.isNew && (
-              <span className="px-2 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-bold uppercase tracking-wider">
-                New
-              </span>
+              <span className="tag tag-yellow">New</span>
             )}
             <span
-              className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+              className={`tag ${
                 game.difficulty === 'Easy'
-                  ? 'bg-green-500/20 text-green-300'
+                  ? 'tag-green'
                   : game.difficulty === 'Medium'
-                  ? 'bg-yellow-500/20 text-yellow-300'
-                  : 'bg-red-500/20 text-red-300'
+                  ? 'tag-yellow'
+                  : 'tag-pink'
               }`}
             >
               {game.difficulty}
             </span>
           </div>
-          <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
+          <h1 className={`text-3xl md:text-4xl font-black ${isLightBg ? 'text-navy' : 'text-white'} mb-2 uppercase`}>
             {game.title}
           </h1>
-          <p className="text-white/70 text-sm md:text-base max-w-lg mb-6">
+          <p className={`${isLightBg ? 'text-navy/70' : 'text-white/80'} text-sm md:text-base max-w-lg mb-6 font-medium`}>
             {game.description}
           </p>
 
           {user ? (
             <Link
               to={`/play/${game.id}`}
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white text-gray-900 font-bold text-sm hover:bg-gray-100 transition-colors no-underline pulse-glow"
+              className="btn-brutalist bg-white text-navy no-underline"
             >
               <Play className="w-4 h-4" />
               Play Now
@@ -92,7 +89,7 @@ export default function GameDetail() {
           ) : (
             <Link
               to="/login"
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white/20 text-white font-bold text-sm hover:bg-white/30 transition-colors no-underline"
+              className="btn-brutalist bg-navy text-white no-underline"
             >
               <Lock className="w-4 h-4" />
               Sign In to Play
@@ -110,25 +107,26 @@ export default function GameDetail() {
         ].map(({ icon: Icon, label, value }) => (
           <div
             key={label}
-            className="bg-surface-light rounded-xl p-4 text-center border border-white/5"
+            className="brutalist-card p-4 text-center"
           >
-            <Icon className="w-5 h-5 text-gray-400 mx-auto mb-2" />
-            <p className="text-white font-bold text-lg">{value}</p>
-            <p className="text-gray-500 text-xs">{label}</p>
+            <Icon className="w-5 h-5 text-navy/40 mx-auto mb-2" />
+            <p className="text-navy font-black text-lg">{value}</p>
+            <p className="text-navy/50 text-xs font-bold uppercase">{label}</p>
           </div>
         ))}
       </div>
 
       {/* Screenshots Placeholder */}
       <section className="mb-6">
-        <h2 className="text-lg font-bold text-white mb-3">Screenshots</h2>
+        <h2 className="text-lg font-black text-navy mb-3 uppercase">Screenshots</h2>
         <div className="flex gap-3 overflow-x-auto pb-2">
           {SAMPLE_SCREENSHOTS.map((i) => (
             <div
               key={i}
-              className={`shrink-0 w-56 h-36 rounded-xl bg-gradient-to-br ${game.gradient} opacity-60 flex items-center justify-center`}
+              className="shrink-0 w-56 h-36 flex items-center justify-center border-3"
+              style={{ backgroundColor: game.color, opacity: 0.6, borderWidth: '3px', borderColor: '#1A1A2E' }}
             >
-              <span className="text-white/40 text-sm">Preview {i}</span>
+              <span className={`${isLightBg ? 'text-navy/40' : 'text-white/40'} text-sm font-bold`}>Preview {i}</span>
             </div>
           ))}
         </div>
@@ -136,8 +134,8 @@ export default function GameDetail() {
 
       {/* How to Play */}
       <section className="mb-6">
-        <h2 className="text-lg font-bold text-white mb-3">How to Play</h2>
-        <div className="bg-surface-light rounded-xl p-5 border border-white/5">
+        <h2 className="text-lg font-black text-navy mb-3 uppercase">How to Play</h2>
+        <div className="brutalist-card p-5">
           <ol className="space-y-3">
             {[
               'AI generates an image using Fal.ai',
@@ -147,10 +145,10 @@ export default function GameDetail() {
               'Climb the leaderboard!',
             ].map((step, i) => (
               <li key={i} className="flex items-start gap-3 text-sm">
-                <span className="w-6 h-6 shrink-0 rounded-full bg-primary/20 text-primary text-xs font-bold flex items-center justify-center">
+                <span className="w-6 h-6 shrink-0 bg-primary text-white text-xs font-black flex items-center justify-center border-2 border-navy">
                   {i + 1}
                 </span>
-                <span className="text-gray-300">{step}</span>
+                <span className="text-navy/80 font-medium">{step}</span>
               </li>
             ))}
           </ol>
@@ -160,46 +158,46 @@ export default function GameDetail() {
       {/* Leaderboard Preview */}
       <section>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-bold text-white">Top Players</h2>
+          <h2 className="text-lg font-black text-navy uppercase">Top Players</h2>
           <Link
             to={`/leaderboard?game=${game.id}`}
-            className="text-primary text-xs no-underline hover:underline"
+            className="text-primary text-xs font-bold no-underline hover:underline uppercase"
           >
             View All
           </Link>
         </div>
-        <div className="bg-surface-light rounded-xl border border-white/5 overflow-hidden">
+        <div className="brutalist-card overflow-hidden">
           {leaderboard.length > 0 ? (
             leaderboard.map((entry, i) => (
               <div
                 key={entry.username}
-                className="flex items-center gap-3 px-4 py-3 border-b border-white/5 last:border-0"
+                className="flex items-center gap-3 px-4 py-3 border-b-2 border-navy/10 last:border-0"
               >
                 <span
-                  className={`w-6 text-center text-sm font-bold ${
+                  className={`w-6 text-center text-sm font-black ${
                     i === 0
                       ? 'text-gold'
                       : i === 1
                       ? 'text-silver'
                       : i === 2
                       ? 'text-bronze'
-                      : 'text-gray-500'
+                      : 'text-navy/30'
                   }`}
                 >
                   {i + 1}
                 </span>
-                <span className="text-sm text-white flex-1">
+                <span className="text-sm text-navy font-bold flex-1">
                   {entry.username}
                 </span>
-                <span className="text-sm font-bold text-primary">
+                <span className="text-sm font-black text-primary">
                   {entry.score}
                 </span>
               </div>
             ))
           ) : (
             <div className="px-4 py-8 text-center">
-              <Star className="w-8 h-8 text-gray-600 mx-auto mb-2" />
-              <p className="text-gray-500 text-sm">
+              <Star className="w-8 h-8 text-navy/20 mx-auto mb-2" />
+              <p className="text-navy/50 text-sm font-medium">
                 No scores yet. Be the first!
               </p>
             </div>
