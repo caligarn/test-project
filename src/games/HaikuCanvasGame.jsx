@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ArrowLeft, Loader2, Trash2, X, Play, Pause, SkipBack, SkipForward } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { generateImage } from '../lib/fal'
@@ -145,7 +145,7 @@ export default function HaikuCanvasGame() {
   }
 
   // Auto-advance time-lapse
-  useState(() => {
+  useEffect(() => {
     if (!tlPlaying || gallery.length === 0) return
     const interval = setInterval(() => {
       setTlIndex(prev => {

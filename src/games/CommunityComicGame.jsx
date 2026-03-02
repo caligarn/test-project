@@ -72,7 +72,7 @@ export default function CommunityComicGame() {
       setCreateOpen(false)
 
       // Navigate to last page to see new panel
-      setCurrentPage(Math.floor(updated.length / PANELS_PER_PAGE))
+      setCurrentPage(Math.floor((updated.length - 1) / PANELS_PER_PAGE))
     } catch (err) {
       console.error('Failed to generate panel:', err)
       setError('Failed to generate panel. Check your API key.')
