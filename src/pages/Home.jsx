@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Search, Sparkles, Zap } from 'lucide-react'
 import GameCard from '../components/GameCard'
 import AdBanner from '../components/AdBanner'
-import { ALL_GAMES, MINIGAMES, CATEGORIES, getGamesByCategory, getFeaturedGames } from '../lib/gameData'
+import { ALL_GAMES, CATEGORIES, getGamesByCategory, getFeaturedGames, MINIGAMES } from '../lib/gameData'
 
 export default function Home() {
   const [category, setCategory] = useState('all')
@@ -49,13 +49,13 @@ export default function Home() {
 
       <AdBanner />
 
-      {/* New Games Banner */}
-      <div className="mb-6 flex items-center gap-3 p-4 bg-accent/10" style={{ border: '3px solid #C8FF00' }}>
+      {/* New Minigames Banner */}
+      <div className="mb-6 p-4 flex items-center gap-3" style={{ border: '3px solid #C8FF00', background: 'rgba(200,255,0,0.08)' }}>
         <Zap className="w-5 h-5 text-navy flex-none" />
         <div>
-          <span className="font-black text-navy uppercase text-sm">Now Live — </span>
+          <span className="font-black text-navy uppercase text-sm">New! </span>
           <span className="text-navy/70 text-sm font-medium">
-            {MINIGAMES.map(g => `${g.icon} ${g.title}`).join(' · ')}
+            {MINIGAMES.map(g => `${g.icon} ${g.title}`).join(' · ')} — live AI minigames, playable now.
           </span>
         </div>
       </div>
@@ -66,14 +66,13 @@ export default function Home() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-navy/40" />
           <input type="text" placeholder="Search games..." value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-white text-sm text-navy placeholder-navy/40 focus:outline-none focus:ring-2 focus:ring-highlight font-medium"
-            style={{ border: '3px solid #1A1A2E' }} />
+            className="w-full pl-9 pr-4 py-2 border-3 border-navy bg-white text-sm text-navy placeholder-navy/40 focus:outline-none focus:ring-2 focus:ring-highlight font-medium"
+            style={{ borderWidth: '3px' }} />
         </div>
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
           {CATEGORIES.map((cat) => (
             <button key={cat.id} onClick={() => setCategory(cat.id)}
-              className={`px-3 py-1.5 text-xs font-black uppercase whitespace-nowrap transition-colors ${category === cat.id ? 'bg-navy text-white' : 'bg-white text-navy hover:bg-surface-light'}`}
-              style={{ border: '2px solid #1A1A2E' }}>
+              className={`px-3 py-1.5 text-xs font-black uppercase whitespace-nowrap transition-colors border-2 border-navy ${category === cat.id ? 'bg-navy text-white' : 'bg-white text-navy hover:bg-surface-light'}`}>
               {cat.icon} {cat.label}
             </button>
           ))}
@@ -88,7 +87,7 @@ export default function Home() {
       {games.length === 0 && (
         <div className="text-center py-16">
           <p className="text-4xl mb-3">🎮</p>
-          <p className="text-navy/50 font-medium">No games match your search.</p>
+          <p className="text-navy/50 font-medium">No games found.</p>
         </div>
       )}
     </div>

@@ -40,7 +40,7 @@ export default function PlayGame() {
       <div className="max-w-md mx-auto px-4 py-16 text-center">
         <p className="text-4xl mb-4">🎮</p>
         <p className="text-navy/50 font-medium">Game not found.</p>
-        <Link to="/" className="block mt-4 text-primary text-sm font-bold uppercase no-underline">← Back to Games</Link>
+        <Link to="/" className="block mt-4 text-primary text-sm font-bold no-underline uppercase">← Back to Games</Link>
       </div>
     )
   }
@@ -53,7 +53,10 @@ export default function PlayGame() {
     }
   }
 
-  if (!hasKey) {
+  const GameComponent = GAME_COMPONENTS[gameId]
+
+  // Only gate with API key if this is a real minigame (needs fal.ai)
+  if (GameComponent && !hasKey) {
     return (
       <div className="max-w-md mx-auto px-4 py-12">
         <button onClick={() => navigate(-1)}
@@ -66,26 +69,25 @@ export default function PlayGame() {
           </div>
           <h2 className="text-xl font-black text-navy mb-2 uppercase">Fal.ai API Key Required</h2>
           <p className="text-navy/50 text-sm mb-6 font-medium">
-            All games use AI image generation via Fal.ai. Enter your key once and it's stored locally — never sent anywhere.
+            This game uses AI image generation. Enter your Fal.ai API key to play. Stored locally only — never sent to any server.
           </p>
           <form onSubmit={handleSetKey} className="space-y-3">
-            <input type="password" placeholder="fal-ai key..."
+            <input type="password" placeholder="fal_key_..."
               value={apiKey} onChange={(e) => setApiKey(e.target.value)}
               className="w-full px-4 py-3 bg-white text-navy text-sm placeholder-navy/30 focus:outline-none font-medium"
-              style={{ border: '3px solid #1A1A2E' }} />
+              style={{ borderWidth: '3px', borderStyle: 'solid', borderColor: '#1A1A2E' }} />
             <button type="submit" className="w-full btn-brutalist bg-primary text-white justify-center">
               Save & Play
             </button>
           </form>
           <p className="text-navy/40 text-xs mt-4 font-medium">
-            Get a free key at <a href="https://fal.ai" target="_blank" rel="noopener noreferrer" className="text-primary font-bold">fal.ai</a>
+            Get your free key at <a href="https://fal.ai" target="_blank" rel="noreferrer" className="text-primary font-bold">fal.ai</a>
           </p>
         </div>
       </div>
     )
   }
 
-  const GameComponent = GAME_COMPONENTS[gameId]
   const isLightBg = game.color === '#C8FF00' || game.color === '#FFD600'
 
   return (
@@ -99,12 +101,12 @@ export default function PlayGame() {
         <div className="flex items-center gap-2">
           <span className="text-xl">{game.icon}</span>
           <span className="font-black text-navy uppercase">{game.title}</span>
-          {game.isNew && <span className="tag tag-yellow text-[10px]">New</span>}
+          {game.isNew && <span className="tag tag-yellow text-xs">New</span>}
         </div>
         <div />
       </div>
 
-      {/* Game */}
+      {/* Render live game or placeholder */}
       {GameComponent ? (
         <GameComponent game={game} />
       ) : (
@@ -120,6 +122,11 @@ export default function PlayGame() {
                 Coming soon
               </div>
             </div>
+          </div>
+          <div className="mt-4 grid grid-cols-3 gap-3">
+            {['Hint', 'Skip', 'Submit'].map((a) => (
+              <button key={a} className="py-3 bg-white text-navy text-sm font-black uppercase border-2 border-navy hover:bg-gray-50">{a}</button>
+            ))}
           </div>
           <div className="mt-4 flex items-center justify-between brutalist-card p-4">
             <div><p className="text-xs text-navy/40 font-bold uppercase">Score</p><p className="text-2xl font-black text-navy">0</p></div>
