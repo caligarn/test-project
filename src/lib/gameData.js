@@ -12,6 +12,7 @@ export const GAMES = [
     players: '1,247',
     featured: true,
     isNew: false,
+    playable: false,
   },
   {
     id: 'pixel-duel',
@@ -25,7 +26,8 @@ export const GAMES = [
     difficulty: 'Hard',
     players: '892',
     featured: true,
-    isNew: true,
+    isNew: false,
+    playable: false,
   },
   {
     id: 'style-roulette',
@@ -40,6 +42,7 @@ export const GAMES = [
     players: '2,103',
     featured: false,
     isNew: false,
+    playable: false,
   },
   {
     id: 'speed-prompt',
@@ -54,6 +57,7 @@ export const GAMES = [
     players: '1,567',
     featured: true,
     isNew: false,
+    playable: false,
   },
   {
     id: 'dream-caption',
@@ -68,6 +72,7 @@ export const GAMES = [
     players: '3,421',
     featured: false,
     isNew: false,
+    playable: false,
   },
   {
     id: 'ai-remix',
@@ -81,9 +86,75 @@ export const GAMES = [
     difficulty: 'Hard',
     players: '678',
     featured: false,
-    isNew: true,
+    isNew: false,
+    playable: false,
   },
 ]
+
+export const MINIGAMES = [
+  {
+    id: 'infinimap',
+    title: 'InfiniMap',
+    tagline: 'Explore an infinite AI world',
+    description: 'Click tiles on an infinite grid to generate AI-powered imagery. Pan across the map and discover unique landscapes, each tile blending seamlessly with its neighbors.',
+    icon: '🗺️',
+    color: '#10B981',
+    bgClass: 'bg-[#10B981]',
+    category: 'creative',
+    difficulty: 'Easy',
+    players: '456',
+    featured: true,
+    isNew: true,
+    playable: true,
+  },
+  {
+    id: 'haiku-canvas',
+    title: 'Haiku Canvas',
+    tagline: 'Poetry meets AI art',
+    description: 'Write haikus in the traditional 5-7-5 syllable pattern and watch AI transform your poetry into beautiful artwork. Choose from watercolor, oil painting, ink wash, or digital styles.',
+    icon: '🎋',
+    color: '#6366F1',
+    bgClass: 'bg-[#6366F1]',
+    category: 'creative',
+    difficulty: 'Easy',
+    players: '789',
+    featured: true,
+    isNew: true,
+    playable: true,
+  },
+  {
+    id: 'mosaic-maker',
+    title: 'Mosaic Maker',
+    tagline: 'Build collaborative art',
+    description: 'Create mosaic pieces with AI-generated artwork. Pick a theme, describe each tile, and watch a collaborative mosaic come together piece by piece.',
+    icon: '🧩',
+    color: '#F59E0B',
+    bgClass: 'bg-[#F59E0B]',
+    category: 'creative',
+    difficulty: 'Medium',
+    players: '321',
+    featured: false,
+    isNew: true,
+    playable: true,
+  },
+  {
+    id: 'community-comic',
+    title: 'Community Comic',
+    tagline: 'Create AI comic stories',
+    description: 'Build comic stories panel by panel! Choose art styles like manga, superhero, cartoon, or noir. Add captions, dialogue, and AI generates the artwork for each panel.',
+    icon: '📚',
+    color: '#EC4899',
+    bgClass: 'bg-[#EC4899]',
+    category: 'creative',
+    difficulty: 'Medium',
+    players: '234',
+    featured: false,
+    isNew: true,
+    playable: true,
+  },
+]
+
+export const ALL_GAMES = [...GAMES, ...MINIGAMES]
 
 export const CATEGORIES = [
   { id: 'all', label: 'All Games', icon: '🎮' },
@@ -94,14 +165,18 @@ export const CATEGORIES = [
 ]
 
 export function getGame(id) {
-  return GAMES.find((g) => g.id === id)
+  return ALL_GAMES.find((g) => g.id === id)
 }
 
 export function getGamesByCategory(category) {
-  if (category === 'all') return GAMES
-  return GAMES.filter((g) => g.category === category)
+  if (category === 'all') return ALL_GAMES
+  return ALL_GAMES.filter((g) => g.category === category)
 }
 
 export function getFeaturedGames() {
-  return GAMES.filter((g) => g.featured)
+  return ALL_GAMES.filter((g) => g.featured)
+}
+
+export function getAllGames() {
+  return ALL_GAMES
 }

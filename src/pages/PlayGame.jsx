@@ -4,6 +4,17 @@ import { ArrowLeft, Settings, Key } from 'lucide-react'
 import { getGame } from '../lib/gameData'
 import { useAuth } from '../context/AuthContext'
 import { isConfigured, configureFal } from '../lib/fal'
+import InfinimapGame from '../games/InfinimapGame'
+import HaikuCanvasGame from '../games/HaikuCanvasGame'
+import MosaicGame from '../games/MosaicGame'
+import CommunityComicGame from '../games/CommunityComicGame'
+
+const GAME_COMPONENTS = {
+  'infinimap': InfinimapGame,
+  'haiku-canvas': HaikuCanvasGame,
+  'mosaic-maker': MosaicGame,
+  'community-comic': CommunityComicGame,
+}
 
 export default function PlayGame() {
   const { gameId } = useParams()
@@ -95,6 +106,14 @@ export default function PlayGame() {
     )
   }
 
+  // Check if this game has a real component
+  const GameComponent = GAME_COMPONENTS[gameId]
+
+  if (GameComponent) {
+    return <GameComponent />
+  }
+
+  // Fallback: Coming soon placeholder for original 6 games
   const isLightBg = game.color === '#C8FF00' || game.color === '#FFD600'
 
   return (
@@ -129,21 +148,9 @@ export default function PlayGame() {
           </p>
           <div className={`inline-flex items-center gap-2 px-6 py-3 ${isLightBg ? 'bg-navy text-white' : 'bg-white text-navy'} text-sm font-black uppercase border-2 border-navy`}>
             <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
-            Game ready — coming soon
+            Coming Soon
           </div>
         </div>
-      </div>
-
-      {/* Game Controls Placeholder */}
-      <div className="mt-4 grid grid-cols-3 gap-3">
-        {['Hint', 'Skip', 'Submit'].map((action) => (
-          <button
-            key={action}
-            className="py-3 bg-white text-navy text-sm font-black uppercase hover:bg-surface-light transition-colors border-2 border-navy"
-          >
-            {action}
-          </button>
-        ))}
       </div>
 
       {/* Score Area */}

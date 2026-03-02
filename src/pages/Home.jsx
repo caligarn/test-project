@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Search, Sparkles, Zap } from 'lucide-react'
 import GameCard from '../components/GameCard'
 import AdBanner from '../components/AdBanner'
-import { GAMES, CATEGORIES, getGamesByCategory, getFeaturedGames } from '../lib/gameData'
+import { ALL_GAMES, CATEGORIES, getGamesByCategory, getFeaturedGames } from '../lib/gameData'
 
 export default function Home() {
   const [category, setCategory] = useState('all')
@@ -22,6 +22,7 @@ export default function Home() {
           <div className="flex items-center gap-2 mb-4">
             <span className="tag tag-pink">AI Games</span>
             <span className="tag tag-green">Community</span>
+            <span className="tag tag-yellow">New Games</span>
           </div>
           <h1 className="text-4xl md:text-6xl font-black text-navy mb-4 uppercase leading-none">
             Play.<br />
@@ -29,7 +30,7 @@ export default function Home() {
             Compete.
           </h1>
           <p className="text-navy/60 text-sm md:text-base max-w-lg font-medium">
-            The future of AI gaming is here. Six unique games
+            The future of AI gaming is here. Ten unique games
             powered by cutting-edge image generation. How high can you score?
           </p>
         </div>
@@ -47,7 +48,7 @@ export default function Home() {
           </div>
           <div className="flex gap-2 mt-6">
             <div className="border-2 border-white/30 px-3 py-2 text-center flex-1">
-              <p className="text-xl font-black text-white">6</p>
+              <p className="text-xl font-black text-white">10</p>
               <p className="text-[10px] font-bold text-white/70 uppercase">Games</p>
             </div>
             <div className="border-2 border-white/30 px-3 py-2 text-center flex-1">
@@ -138,14 +139,14 @@ export default function Home() {
               Daily Challenge
             </p>
             <p className="text-navy font-black text-lg uppercase">
-              Prompt Guesser: Movie Scenes Edition
+              Haiku Canvas: Nature Poetry Edition
             </p>
             <p className="text-navy/60 text-sm font-medium">
-              Guess the movie scene prompts — bonus XP today!
+              Write a nature haiku and generate stunning artwork — bonus XP today!
             </p>
           </div>
           <a
-            href="/game/prompt-guesser"
+            href="/play/haiku-canvas"
             className="btn-brutalist bg-navy text-accent no-underline"
           >
             Play Now
