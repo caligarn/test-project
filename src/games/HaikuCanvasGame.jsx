@@ -58,6 +58,7 @@ export default function HaikuCanvasGame() {
   const [showTimeLapse, setShowTimeLapse] = useState(false)
   const [tlIndex, setTlIndex] = useState(0)
   const [tlPlaying, setTlPlaying] = useState(false)
+  const [tlSpeed, setTlSpeed] = useState(1500)
 
   const s1 = countLineSyllables(line1)
   const s2 = countLineSyllables(line2)
@@ -152,9 +153,9 @@ export default function HaikuCanvasGame() {
         if (prev >= gallery.length - 1) { setTlPlaying(false); return prev }
         return prev + 1
       })
-    }, 1500)
+    }, tlSpeed)
     return () => clearInterval(interval)
-  }, [tlPlaying, gallery.length])
+  }, [tlPlaying, gallery.length, tlSpeed])
 
   const latestImage = gallery.length > 0 ? gallery[0] : null
   const reversedGallery = [...gallery].reverse()
@@ -292,6 +293,29 @@ export default function HaikuCanvasGame() {
               <button onClick={() => { setTlPlaying(false); setTlIndex(i => Math.min(reversedGallery.length - 1, i + 1)) }}
                 disabled={tlIndex >= reversedGallery.length - 1}
                 className="btn-brutalist bg-white text-navy py-1 px-2"><SkipForward className="w-4 h-4" /></button>
+            </div>
+
+            {/* Speed Control */}
+            <div className="flex justify-center items-center gap-3 mt-3">
+              <span className="text-xs text-navy/50 font-bold uppercase">Speed:</span>
+              <div className="flex gap-1.5">
+                {[
+                  { label: '0.5x', value: 3000 },
+                  { label: '1x', value: 1500 },
+                  { label: '2x', value: 750 },
+                  { label: '4x', value: 375 },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setTlSpeed(opt.value)}
+                    className={`btn-brutalist py-0.5 px-2 text-[10px] font-black ${
+                      tlSpeed === opt.value ? 'bg-primary text-white' : 'bg-white text-navy'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Progress Bar */}
