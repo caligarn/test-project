@@ -51,6 +51,7 @@ function scoreSimilarity(guess, original) {
 
 export default function PromptGuesserGame({ game }) {
   const { user } = useAuth()
+  const username = user?.username || 'guest'
   const [round, setRound] = useState(1)
   const [totalScore, setTotalScore] = useState(0)
   const [imageUrl, setImageUrl] = useState(null)
@@ -99,7 +100,7 @@ export default function PromptGuesserGame({ game }) {
     const pts = Math.round(similarity * hintPenalty)
     setResult({ similarity, pts })
     setTotalScore(s => s + pts)
-    addScore(game.id, user.username, pts, { guess, actual: hiddenPrompt, similarity })
+    addScore(game.id, username, pts, { guess, actual: hiddenPrompt, similarity })
   }
 
   const showHint = () => {

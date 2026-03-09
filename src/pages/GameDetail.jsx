@@ -78,23 +78,13 @@ export default function GameDetail() {
             {game.description}
           </p>
 
-          {user ? (
-            <Link
-              to={`/play/${game.id}`}
-              className="btn-brutalist bg-white text-navy no-underline"
-            >
-              <Play className="w-4 h-4" />
-              Play Now
-            </Link>
-          ) : (
-            <Link
-              to="/login"
-              className="btn-brutalist bg-navy text-white no-underline"
-            >
-              <Lock className="w-4 h-4" />
-              Sign In to Play
-            </Link>
-          )}
+          <Link
+            to={`/play/${game.id}`}
+            className="btn-brutalist bg-white text-navy no-underline"
+          >
+            <Play className="w-4 h-4" />
+            Play Now
+          </Link>
         </div>
       </div>
 

@@ -39,6 +39,7 @@ function shuffle(arr) {
 
 export default function StyleRouletteGame({ game }) {
   const { user } = useAuth()
+  const username = user?.username || 'guest'
   const [round, setRound] = useState(1)
   const [totalScore, setTotalScore] = useState(0)
   const [streak, setStreak] = useState(0)
@@ -101,7 +102,7 @@ export default function StyleRouletteGame({ game }) {
     setStreak(isCorrect ? streak + 1 : 0)
     setTotalScore(s => s + pts)
     if (isCorrect) {
-      addScore(game.id, user.username, pts, { style: correctStyle.id, round, timeLeft })
+      addScore(game.id, username, pts, { style: correctStyle.id, round, timeLeft })
     }
     setPhase('result')
   }
