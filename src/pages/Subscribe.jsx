@@ -165,11 +165,11 @@ export default function Subscribe() {
       <div className="text-center mb-10">
         <span className="tag tag-yellow mb-4 inline-flex items-center gap-1">
           <Crown className="w-3.5 h-3.5" />
-          AI ARCADE PRO
+          GEN ARCADE PRO
         </span>
         <h1 className="text-3xl md:text-4xl font-black text-navy mb-3 uppercase">
           Unlock the Full{' '}
-          <span className="gradient-text">AI Arcade</span>{' '}
+          <span className="gradient-text">Gen Arcade</span>{' '}
           Experience
         </h1>
         <p className="text-navy/50 max-w-lg mx-auto font-medium">
@@ -200,7 +200,7 @@ export default function Subscribe() {
         <div className="mb-8 px-5 py-4 bg-accent border-3 text-center" style={{ borderWidth: '3px', borderColor: '#1A1A2E' }}>
           <p className="text-navy font-black text-sm flex items-center justify-center gap-2 uppercase">
             <Check className="w-4 h-4" />
-            You're subscribed! Thank you for supporting AI Arcade.
+            You're subscribed! Thank you for supporting Gen Arcade.
           </p>
         </div>
       )}
@@ -390,7 +390,7 @@ const FAQ = [
   },
   {
     q: 'Do I need my own Fal.ai API key?',
-    a: 'No! AI Arcade provides the AI image generation. Your credits cover the cost of image generation.',
+    a: 'No! Gen Arcade provides the AI image generation. Your credits cover the cost of image generation.',
   },
   {
     q: 'Can I cancel anytime?',

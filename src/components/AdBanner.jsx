@@ -23,7 +23,7 @@ export default function AdBanner() {
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-black text-navy mb-0.5 uppercase">
-            Go Ad-Free with AI Arcade Pro
+            Go Ad-Free with Gen Arcade Pro
           </p>
           <p className="text-xs text-navy/70 mb-2 font-medium">
             Unlimited games, exclusive content, and no interruptions.

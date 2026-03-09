@@ -6,6 +6,7 @@ export const GAMES = [
     description: 'Two players compete in real-time to create the best AI image from a random prompt. Draw on a canvas, type prompts, and watch the AI generate live — Krea-style. Spectators vote for the winner!',
     icon: '🥊', color: '#14B8A6', bgClass: 'bg-[#14B8A6]',
     category: 'speed', difficulty: 'Medium', players: '2', featured: true, isNew: true, pointsPerAction: 200,
+    section: 'icebreakers',
   },
   {
     id: 'prompt-guesser',
@@ -14,6 +15,7 @@ export const GAMES = [
     description: 'An AI-generated image is shown. Can you guess the prompt that created it? The closer your guess, the higher your score!',
     icon: '🔍', color: '#FF2D55', bgClass: 'bg-primary',
     category: 'puzzle', difficulty: 'Medium', players: '1,247', featured: true, isNew: false, pointsPerAction: 100,
+    section: 'new',
   },
   {
     id: 'pixel-duel',
@@ -22,6 +24,7 @@ export const GAMES = [
     description: 'See an AI image, then write your own prompt to recreate it as closely as possible. AI judges the similarity!',
     icon: '⚔️', color: '#C8FF00', bgClass: 'bg-accent',
     category: 'creative', difficulty: 'Hard', players: '892', featured: true, isNew: true, pointsPerAction: 150,
+    section: 'new',
   },
   {
     id: 'style-roulette',
@@ -30,6 +33,7 @@ export const GAMES = [
     description: 'Given a reference art style, pick which of 4 AI-generated images matches it. Quick rounds, climbing difficulty!',
     icon: '🎨', color: '#FF6B35', bgClass: 'bg-[#FF6B35]',
     category: 'trivia', difficulty: 'Easy', players: '2,103', featured: false, isNew: false, pointsPerAction: 100,
+    section: 'new',
   },
   {
     id: 'speed-prompt',
@@ -38,6 +42,7 @@ export const GAMES = [
     description: 'You have 30 seconds to write the perfect prompt for a target concept. The AI generates it — how close can you get?',
     icon: '⚡', color: '#FFD600', bgClass: 'bg-highlight',
     category: 'speed', difficulty: 'Medium', players: '1,567', featured: true, isNew: false, pointsPerAction: 100,
+    section: 'new',
   },
   {
     id: 'dream-caption',
@@ -46,6 +51,7 @@ export const GAMES = [
     description: 'AI generates surreal, dreamlike images. Write the most creative and fitting caption. Community votes decide the winner!',
     icon: '💭', color: '#8B5CF6', bgClass: 'bg-[#8B5CF6]',
     category: 'creative', difficulty: 'Easy', players: '3,421', featured: false, isNew: false, pointsPerAction: 75,
+    section: 'new',
   },
   {
     id: 'ai-remix',
@@ -54,6 +60,17 @@ export const GAMES = [
     description: 'Start with a base image and iteratively modify it with prompt tweaks. Guide the AI through a creative evolution chain!',
     icon: '🔄', color: '#00D4FF', bgClass: 'bg-[#00D4FF]',
     category: 'creative', difficulty: 'Hard', players: '678', featured: false, isNew: true, pointsPerAction: 50,
+    section: 'new',
+  },
+  {
+    id: 'crowd-graffiti',
+    title: 'Crowd Graffiti',
+    tagline: 'Tag the wall together',
+    description: 'A shared digital wall where everyone adds AI-generated graffiti art. Write your tag, pick a style, and leave your mark on the collective mural!',
+    icon: '🎨', color: '#E11D48', bgClass: 'bg-[#E11D48]',
+    category: 'creative', difficulty: 'Easy', players: '0',
+    featured: false, isNew: true, pointsPerAction: 60,
+    section: 'new',
   },
 ]
 
@@ -66,6 +83,7 @@ export const MINIGAMES = [
     icon: '🗺️', color: '#1E1B4B', bgClass: 'bg-[#1E1B4B]',
     category: 'creative', difficulty: 'Easy', players: '0',
     featured: true, isNew: true, pointsPerAction: 50,
+    section: 'new',
   },
   {
     id: 'haiku-canvas',
@@ -75,6 +93,7 @@ export const MINIGAMES = [
     icon: '🌸', color: '#0F172A', bgClass: 'bg-[#0F172A]',
     category: 'creative', difficulty: 'Easy', players: '0',
     featured: true, isNew: true, pointsPerAction: 75,
+    section: 'icebreakers',
   },
   {
     id: 'mosaic-maker',
@@ -84,6 +103,7 @@ export const MINIGAMES = [
     icon: '🧩', color: '#1F2937', bgClass: 'bg-[#1F2937]',
     category: 'creative', difficulty: 'Easy', players: '0',
     featured: false, isNew: true, pointsPerAction: 60,
+    section: 'new',
   },
   {
     id: 'community-comic',
@@ -93,10 +113,14 @@ export const MINIGAMES = [
     icon: '📖', color: '#7C2D12', bgClass: 'bg-[#7C2D12]',
     category: 'creative', difficulty: 'Easy', players: '0',
     featured: true, isNew: true, pointsPerAction: 80,
+    section: 'icebreakers',
   },
 ]
 
 export const ALL_GAMES = [...GAMES, ...MINIGAMES]
+
+export const ICEBREAKERS = ALL_GAMES.filter((g) => g.section === 'icebreakers')
+export const NEW_GAMES = ALL_GAMES.filter((g) => g.section === 'new')
 
 export const CATEGORIES = [
   { id: 'all', label: 'All Games', icon: '🎮' },
