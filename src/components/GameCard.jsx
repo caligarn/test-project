@@ -7,7 +7,7 @@ export default function GameCard({ game, size = 'normal' }) {
 
   return (
     <Link
-      to={`/game/${game.id}`}
+      to={`/play/${game.id}`}
       className={`game-card block overflow-hidden no-underline ${
         isLarge ? 'col-span-2 row-span-2' : ''
       }`}
