@@ -662,36 +662,36 @@ export default function PromptOffGame({ game }) {
           </div>
         </div>
 
-        {/* Two columns: You vs Opponent */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Two image boxes side by side, centered */}
+        <div className="grid grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
           {/* YOUR SIDE */}
           <div className="flex flex-col gap-3">
-            <p className="text-sm font-black text-accent uppercase">You ({username})</p>
+            <p className="text-sm font-black text-accent uppercase text-center">You ({username})</p>
 
-            {/* Prompt input — primary control */}
-            <textarea
-              value={myPromptText} onChange={(e) => setMyPromptText(e.target.value)}
-              placeholder="Start typing your prompt... the AI generates as you type!"
-              rows={3}
-              className="w-full px-4 py-3 text-navy text-base focus:outline-none font-semibold resize-none"
-              style={{ border: '3px solid #1A1A2E' }}
-              autoFocus
-            />
+            {/* AI output — large square box */}
+            {myLiveUrl ? (
+              <div style={{ border: '3px solid #C8FF00', overflow: 'hidden' }}>
+                <img src={myLiveUrl} alt="AI output" className="w-full"
+                  style={{ aspectRatio: '1', objectFit: 'cover' }} />
+              </div>
+            ) : (
+              <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase"
+                style={{ border: '3px solid #1A1A2E', aspectRatio: '1' }}>
+                Type a prompt below to generate
+              </div>
+            )}
 
-            {/* AI output — HERO element, large */}
+            {/* Prompt input — directly below the image box */}
             <div>
-              <p className="text-xs font-black text-navy/30 uppercase mb-1">AI Output (live)</p>
-              {myLiveUrl ? (
-                <div style={{ border: '3px solid #C8FF00', overflow: 'hidden' }}>
-                  <img src={myLiveUrl} alt="AI output" className="w-full"
-                    style={{ aspectRatio: '1', objectFit: 'cover', maxHeight: '480px' }} />
-                </div>
-              ) : (
-                <div className="flex items-center justify-center bg-navy/5 text-navy/20 text-sm font-bold uppercase"
-                  style={{ border: '3px dashed #1A1A2E22', aspectRatio: '1', maxHeight: '480px' }}>
-                  Type a prompt to generate an image
-                </div>
-              )}
+              <p className="text-xs font-black text-navy/40 uppercase mb-1">Your Prompt</p>
+              <textarea
+                value={myPromptText} onChange={(e) => setMyPromptText(e.target.value)}
+                placeholder="Start typing... AI generates as you type!"
+                rows={3}
+                className="w-full px-4 py-3 text-navy text-base focus:outline-none font-semibold resize-none"
+                style={{ border: '3px solid #1A1A2E', background: '#FFFFF0' }}
+                autoFocus
+              />
             </div>
 
             {/* Optional sketch canvas — collapsible helper */}
@@ -704,7 +704,7 @@ export default function PromptOffGame({ game }) {
                   <canvas
                     ref={canvasRef} width={512} height={512}
                     className="w-full cursor-crosshair touch-none"
-                    style={{ display: 'block', background: '#fff', aspectRatio: '1', maxHeight: '400px' }}
+                    style={{ display: 'block', background: '#fff', aspectRatio: '1' }}
                     onMouseDown={handleDrawStart} onMouseMove={handleDrawMove}
                     onMouseUp={handleDrawEnd} onMouseLeave={handleDrawEnd}
                     onTouchStart={handleDrawStart} onTouchMove={handleDrawMove}
@@ -735,41 +735,46 @@ export default function PromptOffGame({ game }) {
 
           {/* OPPONENT SIDE */}
           <div className="flex flex-col gap-3">
-            <p className="text-sm font-black text-primary uppercase">Opponent ({opponentName})</p>
+            <p className="text-sm font-black text-primary uppercase text-center">Opponent ({opponentName})</p>
 
-            <div className="px-4 py-3 bg-navy/5 text-navy/30 text-base font-medium"
-              style={{ border: '3px solid #1A1A2E22' }}>
-              Prompt hidden until judging...
-            </div>
+            {/* Opponent AI output — large square box, matching yours */}
+            {opponentLiveUrl ? (
+              <div style={{ border: '3px solid #FF2D55', overflow: 'hidden' }}>
+                <img src={opponentLiveUrl} alt="Opponent AI" className="w-full"
+                  style={{ aspectRatio: '1', objectFit: 'cover' }} />
+              </div>
+            ) : (
+              <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase"
+                style={{ border: '3px solid #1A1A2E', aspectRatio: '1' }}>
+                Waiting for opponent...
+              </div>
+            )}
 
-            {/* Opponent AI output — large */}
+            {/* Opponent prompt — hidden, but matches layout */}
             <div>
-              <p className="text-xs font-black text-navy/30 uppercase mb-1">Their AI Output</p>
-              {opponentLiveUrl ? (
-                <div style={{ border: '3px solid #FF2D55', overflow: 'hidden' }}>
-                  <img src={opponentLiveUrl} alt="Opponent AI" className="w-full"
-                    style={{ aspectRatio: '1', objectFit: 'cover', maxHeight: '480px' }} />
-                </div>
-              ) : (
-                <div className="flex items-center justify-center bg-navy/5 text-navy/20 text-sm font-bold uppercase"
-                  style={{ border: '3px dashed #1A1A2E22', aspectRatio: '1', maxHeight: '480px' }}>
-                  Waiting for opponent...
-                </div>
-              )}
-            </div>
-
-            {/* Opponent canvas — smaller */}
-            <div>
-              <p className="text-xs font-black text-navy/30 uppercase mb-1">Their Sketch</p>
-              <div className="relative" style={{ border: '3px solid #1A1A2E', maxWidth: '280px' }}>
-                <canvas
-                  ref={opponentCanvasRef} width={512} height={512}
-                  className="w-full"
-                  style={{ display: 'block', background: '#fff', aspectRatio: '1' }}
-                />
-                <div className="absolute inset-0" />
+              <p className="text-xs font-black text-navy/40 uppercase mb-1">Their Prompt</p>
+              <div className="px-4 py-3 bg-navy/5 text-navy/30 text-base font-medium"
+                style={{ border: '3px solid #1A1A2E22', minHeight: '5.5rem' }}>
+                Hidden until judging...
               </div>
             </div>
+
+            {/* Opponent sketch — smaller */}
+            <details className="group">
+              <summary className="text-xs font-black text-navy/40 uppercase cursor-pointer hover:text-navy/60 select-none">
+                + View opponent's sketch
+              </summary>
+              <div className="mt-2">
+                <div className="relative" style={{ border: '3px solid #1A1A2E' }}>
+                  <canvas
+                    ref={opponentCanvasRef} width={512} height={512}
+                    className="w-full"
+                    style={{ display: 'block', background: '#fff', aspectRatio: '1' }}
+                  />
+                  <div className="absolute inset-0" />
+                </div>
+              </div>
+            </details>
           </div>
         </div>
 
