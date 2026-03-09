@@ -4,6 +4,7 @@ import { generateFromSketch, connectRealtime, generateImage } from '../lib/fal'
 import { addScore } from '../lib/storage'
 import { useAuth } from '../context/AuthContext'
 import { Copy, Check, Trash2, Clock, Trophy } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
 
 const PROMPTS = [
   'A dragon sleeping on a pile of gold coins in a cave',
@@ -70,7 +71,13 @@ export default function PromptOffGame({ game }) {
   const [brushSize, setBrushSize] = useState(8)
   const [isDrawingActive, setIsDrawingActive] = useState(false)
 
-  // Voting
+  // Voting (audience)
+  const [voteRoomCode, setVoteRoomCode] = useState('')
+  const [audienceVotes, setAudienceVotes] = useState({ A: 0, B: 0 })
+  const [audienceCount, setAudienceCount] = useState(0)
+  const [votingClosed, setVotingClosed] = useState(false)
+
+  // Legacy voting (kept for peer message compat)
   const [myVote, setMyVote] = useState(null)
   const [opponentVote, setOpponentVote] = useState(null)
 
@@ -88,6 +95,9 @@ export default function PromptOffGame({ game }) {
   const pendingGenerateRef = useRef(false)
   const myPromptRef = useRef('')
   const scoredRef = useRef(false)
+  const votePeerRef = useRef(null)
+  const voteConnectionsRef = useRef([])
+  const audienceVotesRef = useRef({ A: 0, B: 0 })
 
   useEffect(() => { phaseRef.current = phase }, [phase])
   useEffect(() => { myPromptRef.current = myPromptText }, [myPromptText])
@@ -119,6 +129,9 @@ export default function PromptOffGame({ game }) {
         break
       case 'vote':
         setOpponentVote(msg.vote)
+        break
+      case 'vote-room':
+        setVoteRoomCode(msg.code)
         break
       case 'rematch':
         resetGame()
@@ -163,6 +176,8 @@ export default function PromptOffGame({ game }) {
     if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
     if (connRef.current) { connRef.current.close(); connRef.current = null }
     if (peerRef.current) { peerRef.current.destroy(); peerRef.current = null }
+    if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
+    voteConnectionsRef.current = []
     setConnected(false)
   }
 
@@ -441,6 +456,77 @@ export default function PromptOffGame({ game }) {
     return () => clearTimeout(timeout)
   }, [myFinalUrl, opponentFinalUrl, phase, myLiveUrl, opponentLiveUrl])
 
+  // ---------- AUDIENCE VOTING ROOM ----------
+
+  useEffect(() => {
+    if (phase !== 'voting') return
+    // Only the host creates the voting room
+    if (!isHost) return
+
+    const code = roomCode || generateRoomCode()
+    setVoteRoomCode(code)
+    setAudienceVotes({ A: 0, B: 0 })
+    setAudienceCount(0)
+    setVotingClosed(false)
+    audienceVotesRef.current = { A: 0, B: 0 }
+    voteConnectionsRef.current = []
+
+    const votePeer = new Peer(`promptoff-vote-${code}`)
+    votePeerRef.current = votePeer
+
+    votePeer.on('connection', (conn) => {
+      voteConnectionsRef.current.push(conn)
+      setAudienceCount(prev => prev + 1)
+
+      conn.on('open', () => {
+        // Send the vote data to the new viewer
+        conn.send({
+          type: 'vote-data',
+          prompt: targetPrompt,
+          imageA: myFinalUrl || myLiveUrl || '',
+          imageB: opponentFinalUrl || opponentLiveUrl || '',
+          labelA: username,
+          labelB: opponentName,
+        })
+      })
+
+      conn.on('data', (msg) => {
+        if (msg.type === 'vote' && (msg.vote === 'A' || msg.vote === 'B')) {
+          audienceVotesRef.current[msg.vote]++
+          setAudienceVotes({ ...audienceVotesRef.current })
+        }
+      })
+
+      conn.on('close', () => {
+        voteConnectionsRef.current = voteConnectionsRef.current.filter(c => c !== conn)
+        setAudienceCount(prev => Math.max(0, prev - 1))
+      })
+    })
+
+    votePeer.on('error', () => { /* ignore voting peer errors */ })
+
+    // Also tell the opponent the vote room code
+    send({ type: 'vote-room', code })
+
+    return () => {
+      if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
+      voteConnectionsRef.current = []
+    }
+  }, [phase])
+
+  // Guest receives vote room code from host
+  useEffect(() => {
+    // handled in handleMessage
+  }, [])
+
+  function broadcastResults() {
+    const results = { votesA: audienceVotes.A, votesB: audienceVotes.B }
+    voteConnectionsRef.current.forEach(conn => {
+      if (conn.open) conn.send({ type: 'vote-results', results })
+    })
+    setVotingClosed(true)
+  }
+
   // ---------- CANVAS DRAWING ----------
 
   function getCanvasPos(e, canvas) {
@@ -534,6 +620,13 @@ export default function PromptOffGame({ game }) {
     setOpponentFinalPrompt('')
     setMyVote(null)
     setOpponentVote(null)
+    setVoteRoomCode('')
+    setAudienceVotes({ A: 0, B: 0 })
+    setAudienceCount(0)
+    setVotingClosed(false)
+    audienceVotesRef.current = { A: 0, B: 0 }
+    if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
+    voteConnectionsRef.current = []
     scoredRef.current = false
   }
 
@@ -547,14 +640,17 @@ export default function PromptOffGame({ game }) {
   const iWon = winner === myRole
   const theyWon = winner && winner !== 'tie' && winner !== myRole
 
-  // Score on result
+  // Score on audience vote result
   useEffect(() => {
-    if (winner && (phase === 'voting' || phase === 'judging') && !scoredRef.current) {
+    if (votingClosed && !scoredRef.current) {
       scoredRef.current = true
-      const pts = iWon ? 200 : theyWon ? 50 : 100
-      addScore(game.id, username, pts, { prompt: targetPrompt, result: winner })
+      const iWonAudience = audienceVotes.A > audienceVotes.B
+      const theyWonAudience = audienceVotes.B > audienceVotes.A
+      const pts = iWonAudience ? 200 : theyWonAudience ? 50 : 100
+      const result = iWonAudience ? 'win' : theyWonAudience ? 'loss' : 'tie'
+      addScore(game.id, username, pts, { prompt: targetPrompt, result, votes: audienceVotes })
     }
-  }, [winner, phase])
+  }, [votingClosed])
 
   // ==================== RENDER ====================
 
@@ -842,8 +938,14 @@ export default function PromptOffGame({ game }) {
     )
   }
 
-  // VOTING — both outputs visible, audience votes
+  // VOTING — audience votes via QR code, players see results live
   if (phase === 'voting' || phase === 'judging') {
+    const totalVotes = audienceVotes.A + audienceVotes.B
+    const pctA = totalVotes > 0 ? Math.round((audienceVotes.A / totalVotes) * 100) : 0
+    const pctB = totalVotes > 0 ? Math.round((audienceVotes.B / totalVotes) * 100) : 0
+    const audienceWinner = votingClosed ? (audienceVotes.A > audienceVotes.B ? username : audienceVotes.B > audienceVotes.A ? opponentName : null) : null
+    const voteUrl = voteRoomCode ? `${window.location.origin}/vote/${voteRoomCode}` : ''
+
     return (
       <div className="flex flex-col gap-4">
         {/* Header with prompt */}
@@ -854,100 +956,121 @@ export default function PromptOffGame({ game }) {
 
         {/* Both outputs side by side */}
         <div className="grid grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
-          {/* Player A */}
+          {/* Player A (you) */}
           <div className="flex flex-col gap-2">
-            <p className="text-sm font-black text-accent uppercase text-center">You ({username})</p>
-            <div style={{ border: `3px solid ${myVote === myRole ? '#C8FF00' : '#1A1A2E'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}
-              className={`transition-all ${!myVote ? 'cursor-pointer hover:scale-[1.02]' : ''}`}
-              onClick={!myVote ? () => castVote(myRole) : undefined}>
+            <p className="text-sm font-black text-accent uppercase text-center">{username}</p>
+            <div style={{ border: `3px solid ${votingClosed && audienceVotes.A >= audienceVotes.B ? '#C8FF00' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
               {myFinalUrl ? (
                 <img src={myFinalUrl} alt="Your final" className="w-full h-full" style={{ objectFit: 'cover', display: 'block' }} />
               ) : (
                 <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">No image</div>
               )}
-              {!myVote && (
-                <div className="absolute inset-x-0 bottom-0 py-2 text-center text-xs font-black uppercase"
-                  style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.7))', color: '#C8FF00' }}>
-                  Click to vote
-                </div>
-              )}
-              {myVote === myRole && (
-                <div className="absolute top-2 right-2 px-2 py-1 text-xs font-black uppercase"
-                  style={{ background: '#C8FF00', color: '#1A1A2E' }}>
-                  Your Vote
-                </div>
+              {votingClosed && audienceVotes.A > audienceVotes.B && (
+                <div className="absolute top-2 left-2 px-2 py-1 text-xs font-black uppercase"
+                  style={{ background: '#C8FF00', color: '#1A1A2E' }}>Winner</div>
               )}
             </div>
             <p className="text-xs text-white/50 font-medium text-center">
-              Prompt: <span className="text-white font-bold">{myFinalPrompt}</span>
+              <span className="text-white font-bold">{myFinalPrompt}</span>
             </p>
+            {/* Vote bar */}
+            {totalVotes > 0 && (
+              <div className="w-full h-8 relative" style={{ border: '2px solid #C8FF00', background: '#1a1a2e' }}>
+                <div className="h-full transition-all duration-700" style={{ width: `${pctA}%`, background: '#C8FF00' }} />
+                <span className="absolute inset-0 flex items-center justify-center text-xs font-black"
+                  style={{ color: pctA > 50 ? '#1A1A2E' : '#C8FF00' }}>
+                  {pctA}% ({audienceVotes.A})
+                </span>
+              </div>
+            )}
           </div>
 
-          {/* Player B */}
+          {/* Player B (opponent) */}
           <div className="flex flex-col gap-2">
             <p className="text-sm font-black text-primary uppercase text-center">{opponentName}</p>
-            <div style={{ border: `3px solid ${myVote && myVote !== myRole ? '#FF2D55' : '#1A1A2E'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}
-              className={`transition-all ${!myVote ? 'cursor-pointer hover:scale-[1.02]' : ''}`}
-              onClick={!myVote ? () => castVote(isHost ? 'guest' : 'host') : undefined}>
+            <div style={{ border: `3px solid ${votingClosed && audienceVotes.B >= audienceVotes.A ? '#FF2D55' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
               {opponentFinalUrl ? (
                 <img src={opponentFinalUrl} alt="Opponent final" className="w-full h-full" style={{ objectFit: 'cover', display: 'block' }} />
               ) : (
                 <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">No image</div>
               )}
-              {!myVote && (
-                <div className="absolute inset-x-0 bottom-0 py-2 text-center text-xs font-black uppercase"
-                  style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.7))', color: '#FF2D55' }}>
-                  Click to vote
-                </div>
-              )}
-              {myVote && myVote !== myRole && (
-                <div className="absolute top-2 right-2 px-2 py-1 text-xs font-black uppercase"
-                  style={{ background: '#FF2D55', color: '#fff' }}>
-                  Your Vote
-                </div>
+              {votingClosed && audienceVotes.B > audienceVotes.A && (
+                <div className="absolute top-2 left-2 px-2 py-1 text-xs font-black uppercase"
+                  style={{ background: '#FF2D55', color: '#fff' }}>Winner</div>
               )}
             </div>
             <p className="text-xs text-white/50 font-medium text-center">
-              Prompt: <span className="text-white font-bold">{opponentFinalPrompt}</span>
+              <span className="text-white font-bold">{opponentFinalPrompt}</span>
             </p>
+            {/* Vote bar */}
+            {totalVotes > 0 && (
+              <div className="w-full h-8 relative" style={{ border: '2px solid #FF2D55', background: '#1a1a2e' }}>
+                <div className="h-full transition-all duration-700" style={{ width: `${pctB}%`, background: '#FF2D55' }} />
+                <span className="absolute inset-0 flex items-center justify-center text-xs font-black"
+                  style={{ color: pctB > 50 ? '#fff' : '#FF2D55' }}>
+                  {pctB}% ({audienceVotes.B})
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Voting UI */}
-        {!myVote ? (
-          <div className="brutalist-card p-5 text-center">
-            <p className="text-sm font-black text-navy uppercase mb-2">Vote for the best image!</p>
-            <p className="text-xs text-navy/40 font-medium">Click on an image above, or use the buttons below</p>
-            <div className="flex gap-3 justify-center mt-3">
-              <button onClick={() => castVote(myRole)}
-                className="flex-1 max-w-[200px] py-3 font-black uppercase text-sm transition-transform hover:scale-105"
-                style={{ border: '3px solid #C8FF00', background: 'rgba(200,255,0,0.1)', color: '#C8FF00' }}>
-                Vote: Mine
-              </button>
-              <button onClick={() => castVote(isHost ? 'guest' : 'host')}
-                className="flex-1 max-w-[200px] py-3 font-black uppercase text-sm transition-transform hover:scale-105"
-                style={{ border: '3px solid #FF2D55', background: 'rgba(255,45,85,0.1)', color: '#FF2D55' }}>
-                Vote: {opponentName}
-              </button>
-            </div>
-          </div>
-        ) : !winner ? (
-          <div className="brutalist-card p-5 text-center">
-            <div className="animate-spin rounded-full mx-auto mb-2"
-              style={{ width: 24, height: 24, border: '3px solid #1A1A2E33', borderTopColor: '#1A1A2E' }} />
-            <p className="text-sm font-bold text-navy/50">You voted! Waiting for {opponentName}...</p>
+        {/* QR Code + Audience voting panel */}
+        {!votingClosed ? (
+          <div className="brutalist-card p-6 text-center">
+            <p className="text-sm font-black text-navy uppercase mb-1">Audience Vote</p>
+            <p className="text-xs text-navy/40 font-medium mb-4">Scan to vote for your favorite!</p>
+
+            {voteUrl ? (
+              <div className="flex flex-col items-center gap-4">
+                <div className="bg-white p-3 inline-block" style={{ borderRadius: 8 }}>
+                  <QRCodeSVG value={voteUrl} size={180} level="M"
+                    fgColor="#1A1A2E" bgColor="#ffffff" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <code className="text-xs text-white/60 font-mono bg-white/10 px-3 py-1.5"
+                    style={{ border: '1px solid rgba(255,255,255,0.1)' }}>
+                    {voteUrl}
+                  </code>
+                  <button onClick={() => { navigator.clipboard.writeText(voteUrl); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
+                    className="p-1.5 hover:bg-white/10 transition-colors" title="Copy link">
+                    {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4 text-white/40" />}
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-3 text-white/50 text-sm font-bold mt-2">
+                  <span>{audienceCount} viewer{audienceCount !== 1 ? 's' : ''} connected</span>
+                  <span>|</span>
+                  <span>{totalVotes} vote{totalVotes !== 1 ? 's' : ''} cast</span>
+                </div>
+
+                {isHost && totalVotes > 0 && (
+                  <button onClick={broadcastResults}
+                    className="mt-2 px-8 py-3 font-black uppercase text-sm transition-transform hover:scale-105"
+                    style={{ border: '3px solid #C8FF00', background: 'rgba(200,255,0,0.15)', color: '#C8FF00' }}>
+                    Close Voting & Reveal Results
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center justify-center gap-2 text-white/30 text-sm">
+                <div className="animate-spin rounded-full"
+                  style={{ width: 16, height: 16, border: '2px solid #ffffff33', borderTopColor: '#C8FF00' }} />
+                <span>Setting up vote room...</span>
+              </div>
+            )}
           </div>
         ) : (
           <div className="brutalist-card p-8 text-center">
-            <Trophy className={`w-14 h-14 mx-auto mb-3 ${iWon ? 'text-yellow-500' : theyWon ? 'text-navy/30' : 'text-navy/50'}`} />
+            <Trophy className={`w-14 h-14 mx-auto mb-3 ${audienceWinner === username ? 'text-yellow-500' : audienceWinner === opponentName ? 'text-navy/30' : 'text-navy/50'}`} />
             <h3 className="text-3xl font-black text-navy uppercase mb-2">
-              {winner === 'tie' ? "It's a Tie!" : iWon ? 'You Win!' : `${opponentName} Wins!`}
+              {!audienceWinner ? "It's a Tie!" : audienceWinner === username ? 'You Win!' : `${opponentName} Wins!`}
             </h3>
-            <p className="text-4xl font-black text-primary mb-1">
-              +{iWon ? 200 : theyWon ? 50 : 100} pts
+            <p className="text-white/40 text-sm font-medium mb-1">
+              {totalVotes} vote{totalVotes !== 1 ? 's' : ''} from the audience
             </p>
-            <p className="text-navy/40 text-xs font-medium mb-6">
-              {winner === 'tie' ? 'Agree to disagree!' : 'Both players agreed on the winner!'}
+            <p className="text-4xl font-black text-primary mb-4">
+              {audienceVotes.A} — {audienceVotes.B}
             </p>
             {connected && (
               <button onClick={requestRematch}

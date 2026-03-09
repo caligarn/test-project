@@ -10,6 +10,7 @@ import Login from './pages/Login'
 import Settings from './pages/Settings'
 import Subscribe from './pages/Subscribe'
 import PlayGame from './pages/PlayGame'
+import VotePage from './pages/VotePage'
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/subscribe" element={<Subscribe />} />
+            <Route path="/vote/:code" element={<VotePage />} />
           </Routes>
         </main>
         <BottomNav />
