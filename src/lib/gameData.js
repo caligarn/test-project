@@ -5,7 +5,7 @@ export const GAMES = [
     tagline: 'Decode the AI\'s imagination',
     description: 'An AI-generated image is shown. Can you guess the prompt that created it? The closer your guess, the higher your score!',
     icon: '🔍', color: '#FF2D55', bgClass: 'bg-primary',
-    category: 'puzzle', difficulty: 'Medium', players: '1,247', featured: true, isNew: false,
+    category: 'puzzle', difficulty: 'Medium', players: '1,247', featured: true, isNew: false, pointsPerAction: 100,
   },
   {
     id: 'pixel-duel',
@@ -13,7 +13,7 @@ export const GAMES = [
     tagline: 'Mirror the masterpiece',
     description: 'See an AI image, then write your own prompt to recreate it as closely as possible. AI judges the similarity!',
     icon: '⚔️', color: '#C8FF00', bgClass: 'bg-accent',
-    category: 'creative', difficulty: 'Hard', players: '892', featured: true, isNew: true,
+    category: 'creative', difficulty: 'Hard', players: '892', featured: true, isNew: true, pointsPerAction: 150,
   },
   {
     id: 'style-roulette',
@@ -21,7 +21,7 @@ export const GAMES = [
     tagline: 'Spot the style',
     description: 'Given a reference art style, pick which of 4 AI-generated images matches it. Quick rounds, climbing difficulty!',
     icon: '🎨', color: '#FF6B35', bgClass: 'bg-[#FF6B35]',
-    category: 'trivia', difficulty: 'Easy', players: '2,103', featured: false, isNew: false,
+    category: 'trivia', difficulty: 'Easy', players: '2,103', featured: false, isNew: false, pointsPerAction: 100,
   },
   {
     id: 'speed-prompt',
@@ -29,7 +29,7 @@ export const GAMES = [
     tagline: 'Race against the clock',
     description: 'You have 30 seconds to write the perfect prompt for a target concept. The AI generates it — how close can you get?',
     icon: '⚡', color: '#FFD600', bgClass: 'bg-highlight',
-    category: 'speed', difficulty: 'Medium', players: '1,567', featured: true, isNew: false,
+    category: 'speed', difficulty: 'Medium', players: '1,567', featured: true, isNew: false, pointsPerAction: 100,
   },
   {
     id: 'dream-caption',
@@ -37,7 +37,7 @@ export const GAMES = [
     tagline: 'Caption the impossible',
     description: 'AI generates surreal, dreamlike images. Write the most creative and fitting caption. Community votes decide the winner!',
     icon: '💭', color: '#8B5CF6', bgClass: 'bg-[#8B5CF6]',
-    category: 'creative', difficulty: 'Easy', players: '3,421', featured: false, isNew: false,
+    category: 'creative', difficulty: 'Easy', players: '3,421', featured: false, isNew: false, pointsPerAction: 75,
   },
   {
     id: 'ai-remix',
@@ -45,7 +45,7 @@ export const GAMES = [
     tagline: 'Transform and evolve',
     description: 'Start with a base image and iteratively modify it with prompt tweaks. Guide the AI through a creative evolution chain!',
     icon: '🔄', color: '#00D4FF', bgClass: 'bg-[#00D4FF]',
-    category: 'creative', difficulty: 'Hard', players: '678', featured: false, isNew: true,
+    category: 'creative', difficulty: 'Hard', players: '678', featured: false, isNew: true, pointsPerAction: 50,
   },
 ]
 

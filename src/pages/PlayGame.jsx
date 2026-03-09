@@ -1,19 +1,33 @@
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
-import { ArrowLeft, Key } from 'lucide-react'
+import { ArrowLeft, Key, Coins } from 'lucide-react'
 import { getGame } from '../lib/gameData'
 import { useAuth } from '../context/AuthContext'
 import { isConfigured, configureFal } from '../lib/fal'
+import { getCredits } from '../lib/storage'
+import BannerAd from '../components/BannerAd'
 import InfinimapGame from '../games/InfinimapGame'
 import HaikuCanvasGame from '../games/HaikuCanvasGame'
 import MosaicGame from '../games/MosaicGame'
 import CommunityComicGame from '../games/CommunityComicGame'
+import PromptGuesserGame from '../games/PromptGuesserGame'
+import PixelDuelGame from '../games/PixelDuelGame'
+import StyleRouletteGame from '../games/StyleRouletteGame'
+import SpeedPromptGame from '../games/SpeedPromptGame'
+import DreamCaptionGame from '../games/DreamCaptionGame'
+import AIRemixGame from '../games/AIRemixGame'
 
 const GAME_COMPONENTS = {
   'infinimap': InfinimapGame,
   'haiku-canvas': HaikuCanvasGame,
   'mosaic-maker': MosaicGame,
   'community-comic': CommunityComicGame,
+  'prompt-guesser': PromptGuesserGame,
+  'pixel-duel': PixelDuelGame,
+  'style-roulette': StyleRouletteGame,
+  'speed-prompt': SpeedPromptGame,
+  'dream-caption': DreamCaptionGame,
+  'ai-remix': AIRemixGame,
 }
 
 export default function PlayGame() {
@@ -54,8 +68,9 @@ export default function PlayGame() {
   }
 
   const GameComponent = GAME_COMPONENTS[gameId]
+  const credits = getCredits(user.username)
 
-  // Only gate with API key if this is a real minigame (needs fal.ai)
+  // Gate with API key if needed
   if (GameComponent && !hasKey) {
     return (
       <div className="max-w-md mx-auto px-4 py-12">
@@ -88,10 +103,39 @@ export default function PlayGame() {
     )
   }
 
-  const isLightBg = game.color === '#C8FF00' || game.color === '#FFD600'
+  // No credits left — prompt to buy
+  if (GameComponent && credits <= 0) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-12">
+        <button onClick={() => navigate(-1)}
+          className="flex items-center gap-1.5 text-navy/50 hover:text-navy text-sm font-bold mb-6 transition-colors uppercase">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <div className="brutalist-card p-8 text-center">
+          <div className="w-16 h-16 bg-highlight flex items-center justify-center mx-auto mb-4 border-2 border-navy">
+            <Coins className="w-8 h-8 text-navy" />
+          </div>
+          <h2 className="text-xl font-black text-navy mb-2 uppercase">Out of Credits</h2>
+          <p className="text-navy/50 text-sm mb-6 font-medium">
+            You've used all your credits for today. Buy more credits or come back tomorrow for 3 free credits!
+          </p>
+          <Link to="/subscribe" className="w-full btn-brutalist bg-primary text-white justify-center no-underline inline-flex">
+            Buy Credits
+          </Link>
+          <p className="text-navy/40 text-xs mt-4 font-medium">
+            Free users get 3 credits daily. Subscribe for 50+ monthly credits.
+          </p>
+        </div>
+        <BannerAd slot="inline" className="mt-6" />
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
+      {/* Top banner ad */}
+      <BannerAd slot="top" className="mb-4" />
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <button onClick={() => navigate(-1)}
@@ -103,35 +147,31 @@ export default function PlayGame() {
           <span className="font-black text-navy uppercase">{game.title}</span>
           {game.isNew && <span className="tag tag-yellow text-xs">New</span>}
         </div>
-        <div />
+        <div className="flex items-center gap-1 text-xs font-black text-navy/50">
+          <Coins className="w-3.5 h-3.5" />
+          {credits}
+        </div>
       </div>
 
-      {/* Render live game or placeholder */}
+      {/* Render live game */}
       {GameComponent ? (
-        <GameComponent game={game} />
+        <>
+          <GameComponent game={game} />
+          <BannerAd slot="inline" className="mt-6" />
+        </>
       ) : (
         <>
           <div className="relative overflow-hidden min-h-[400px] flex items-center justify-center"
             style={{ backgroundColor: game.color, border: '3px solid #1A1A2E' }}>
             <div className="text-center p-8">
               <span className="text-6xl mb-6 block animate-float">{game.icon}</span>
-              <h2 className={`text-2xl font-black ${isLightBg ? 'text-navy' : 'text-white'} mb-3 uppercase`}>{game.title}</h2>
-              <p className={`${isLightBg ? 'text-navy/70' : 'text-white/80'} text-sm max-w-md mx-auto mb-6 font-medium`}>{game.description}</p>
-              <div className={`inline-flex items-center gap-2 px-6 py-3 ${isLightBg ? 'bg-navy text-white' : 'bg-white text-navy'} text-sm font-black uppercase border-2 border-navy`}>
+              <h2 className={`text-2xl font-black ${game.color === '#C8FF00' || game.color === '#FFD600' ? 'text-navy' : 'text-white'} mb-3 uppercase`}>{game.title}</h2>
+              <p className={`${game.color === '#C8FF00' || game.color === '#FFD600' ? 'text-navy/70' : 'text-white/80'} text-sm max-w-md mx-auto mb-6 font-medium`}>{game.description}</p>
+              <div className={`inline-flex items-center gap-2 px-6 py-3 ${game.color === '#C8FF00' || game.color === '#FFD600' ? 'bg-navy text-white' : 'bg-white text-navy'} text-sm font-black uppercase border-2 border-navy`}>
                 <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
                 Coming soon
               </div>
             </div>
-          </div>
-          <div className="mt-4 grid grid-cols-3 gap-3">
-            {['Hint', 'Skip', 'Submit'].map((a) => (
-              <button key={a} className="py-3 bg-white text-navy text-sm font-black uppercase border-2 border-navy hover:bg-gray-50">{a}</button>
-            ))}
-          </div>
-          <div className="mt-4 flex items-center justify-between brutalist-card p-4">
-            <div><p className="text-xs text-navy/40 font-bold uppercase">Score</p><p className="text-2xl font-black text-navy">0</p></div>
-            <div><p className="text-xs text-navy/40 font-bold uppercase">Round</p><p className="text-2xl font-black text-navy">1/5</p></div>
-            <div><p className="text-xs text-navy/40 font-bold uppercase">Time</p><p className="text-2xl font-black text-primary">0:30</p></div>
           </div>
         </>
       )}

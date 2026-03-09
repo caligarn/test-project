@@ -146,6 +146,43 @@ export function isSubscribed() {
   return sub && sub.active
 }
 
+// Credits
+const CREDITS_KEY = 'ai_arcade_credits'
+const FREE_DAILY_CREDITS = 3
+const LAST_FREE_CREDITS_KEY = 'ai_arcade_last_free_credits'
+
+export function getCredits(username) {
+  const credits = JSON.parse(localStorage.getItem(CREDITS_KEY) || '{}')
+  if (!credits[username]) credits[username] = 0
+
+  // Award free daily credits
+  const lastFree = JSON.parse(localStorage.getItem(LAST_FREE_CREDITS_KEY) || '{}')
+  const today = new Date().toDateString()
+  if (lastFree[username] !== today) {
+    credits[username] += FREE_DAILY_CREDITS
+    lastFree[username] = today
+    localStorage.setItem(CREDITS_KEY, JSON.stringify(credits))
+    localStorage.setItem(LAST_FREE_CREDITS_KEY, JSON.stringify(lastFree))
+  }
+
+  return credits[username]
+}
+
+export function useCredit(username) {
+  const credits = JSON.parse(localStorage.getItem(CREDITS_KEY) || '{}')
+  if (!credits[username] || credits[username] <= 0) return false
+  credits[username] -= 1
+  localStorage.setItem(CREDITS_KEY, JSON.stringify(credits))
+  return true
+}
+
+export function addCredits(username, amount) {
+  const credits = JSON.parse(localStorage.getItem(CREDITS_KEY) || '{}')
+  credits[username] = (credits[username] || 0) + amount
+  localStorage.setItem(CREDITS_KEY, JSON.stringify(credits))
+  return credits[username]
+}
+
 // Avatars
 const AVATARS = [
   '🤖', '👾', '🎮', '🕹️', '🎯', '🎨', '🧠', '⚡',
