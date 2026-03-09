@@ -414,12 +414,32 @@ export default function PromptOffGame({ game }) {
     }
   }
 
-  // Move to judging when both finals are in
+  // Move to voting when both finals are in, or after timeout
   useEffect(() => {
-    if (myFinalUrl !== null && opponentFinalUrl !== null && (phase === 'generating' || phase === 'playing')) {
-      setPhase('judging')
+    if (phase !== 'generating') return
+    if (myFinalUrl !== null && opponentFinalUrl !== null) {
+      setPhase('voting')
+      return
     }
-  }, [myFinalUrl, opponentFinalUrl, phase])
+    // Timeout: after 15s, move to voting with whatever we have
+    const timeout = setTimeout(() => {
+      if (phaseRef.current === 'generating') {
+        // Use live URLs as fallback for missing finals
+        if (!myFinalUrl) {
+          const fallback = myLiveUrl || ''
+          setMyFinalUrl(fallback)
+          setMyFinalPrompt(myPromptRef.current.trim() || 'No prompt')
+          send({ type: 'final', url: fallback, prompt: myPromptRef.current.trim() || 'No prompt' })
+        }
+        if (!opponentFinalUrl && opponentLiveUrl) {
+          setOpponentFinalUrl(opponentLiveUrl)
+          setOpponentFinalPrompt('(timed out)')
+        }
+        setPhase('voting')
+      }
+    }, 15000)
+    return () => clearTimeout(timeout)
+  }, [myFinalUrl, opponentFinalUrl, phase, myLiveUrl, opponentLiveUrl])
 
   // ---------- CANVAS DRAWING ----------
 
@@ -529,7 +549,7 @@ export default function PromptOffGame({ game }) {
 
   // Score on result
   useEffect(() => {
-    if (winner && phase === 'judging' && !scoredRef.current) {
+    if (winner && (phase === 'voting' || phase === 'judging') && !scoredRef.current) {
       scoredRef.current = true
       const pts = iWon ? 200 : theyWon ? 50 : 100
       addScore(game.id, username, pts, { prompt: targetPrompt, result: winner })
@@ -662,36 +682,35 @@ export default function PromptOffGame({ game }) {
           </div>
         </div>
 
-        {/* Two columns: You vs Opponent */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Two image boxes side by side, centered */}
+        <div className="grid grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
           {/* YOUR SIDE */}
           <div className="flex flex-col gap-3">
-            <p className="text-sm font-black text-accent uppercase">You ({username})</p>
+            <p className="text-sm font-black text-accent uppercase text-center">You ({username})</p>
 
-            {/* Prompt input — primary control */}
-            <textarea
-              value={myPromptText} onChange={(e) => setMyPromptText(e.target.value)}
-              placeholder="Start typing your prompt... the AI generates as you type!"
-              rows={3}
-              className="w-full px-4 py-3 text-navy text-base focus:outline-none font-semibold resize-none"
-              style={{ border: '3px solid #1A1A2E' }}
-              autoFocus
-            />
-
-            {/* AI output — HERO element, large */}
-            <div>
-              <p className="text-xs font-black text-navy/30 uppercase mb-1">AI Output (live)</p>
+            {/* AI output — large square box */}
+            <div style={{ border: '3px solid #C8FF00', aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
               {myLiveUrl ? (
-                <div style={{ border: '3px solid #C8FF00', overflow: 'hidden' }}>
-                  <img src={myLiveUrl} alt="AI output" className="w-full"
-                    style={{ aspectRatio: '1', objectFit: 'cover', maxHeight: '480px' }} />
-                </div>
+                <img src={myLiveUrl} alt="AI output" className="w-full h-full"
+                  style={{ objectFit: 'cover', display: 'block' }} />
               ) : (
-                <div className="flex items-center justify-center bg-navy/5 text-navy/20 text-sm font-bold uppercase"
-                  style={{ border: '3px dashed #1A1A2E22', aspectRatio: '1', maxHeight: '480px' }}>
-                  Type a prompt to generate an image
+                <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">
+                  Type a prompt below
                 </div>
               )}
+            </div>
+
+            {/* Prompt input — directly below the image box */}
+            <div>
+              <p className="text-xs font-black text-accent uppercase mb-1">Your Prompt</p>
+              <textarea
+                value={myPromptText} onChange={(e) => setMyPromptText(e.target.value)}
+                placeholder="Start typing... AI generates as you type!"
+                rows={3}
+                className="w-full px-4 py-3 text-base focus:outline-none font-semibold resize-none rounded-none"
+                style={{ border: '3px solid #C8FF00', background: '#ffffff', color: '#1A1A2E' }}
+                autoFocus
+              />
             </div>
 
             {/* Optional sketch canvas — collapsible helper */}
@@ -704,7 +723,7 @@ export default function PromptOffGame({ game }) {
                   <canvas
                     ref={canvasRef} width={512} height={512}
                     className="w-full cursor-crosshair touch-none"
-                    style={{ display: 'block', background: '#fff', aspectRatio: '1', maxHeight: '400px' }}
+                    style={{ display: 'block', background: '#fff', aspectRatio: '1' }}
                     onMouseDown={handleDrawStart} onMouseMove={handleDrawMove}
                     onMouseUp={handleDrawEnd} onMouseLeave={handleDrawEnd}
                     onTouchStart={handleDrawStart} onTouchMove={handleDrawMove}
@@ -735,41 +754,31 @@ export default function PromptOffGame({ game }) {
 
           {/* OPPONENT SIDE */}
           <div className="flex flex-col gap-3">
-            <p className="text-sm font-black text-primary uppercase">Opponent ({opponentName})</p>
+            <p className="text-sm font-black text-primary uppercase text-center">Opponent ({opponentName})</p>
 
-            <div className="px-4 py-3 bg-navy/5 text-navy/30 text-base font-medium"
-              style={{ border: '3px solid #1A1A2E22' }}>
-              Prompt hidden until judging...
-            </div>
-
-            {/* Opponent AI output — large */}
-            <div>
-              <p className="text-xs font-black text-navy/30 uppercase mb-1">Their AI Output</p>
+            {/* Opponent AI output — large square box, matching yours */}
+            <div style={{ border: '3px solid #FF2D55', aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
               {opponentLiveUrl ? (
-                <div style={{ border: '3px solid #FF2D55', overflow: 'hidden' }}>
-                  <img src={opponentLiveUrl} alt="Opponent AI" className="w-full"
-                    style={{ aspectRatio: '1', objectFit: 'cover', maxHeight: '480px' }} />
-                </div>
+                <img src={opponentLiveUrl} alt="Opponent AI" className="w-full h-full"
+                  style={{ objectFit: 'cover', display: 'block' }} />
               ) : (
-                <div className="flex items-center justify-center bg-navy/5 text-navy/20 text-sm font-bold uppercase"
-                  style={{ border: '3px dashed #1A1A2E22', aspectRatio: '1', maxHeight: '480px' }}>
+                <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">
                   Waiting for opponent...
                 </div>
               )}
             </div>
 
-            {/* Opponent canvas — smaller */}
+            {/* Opponent prompt — hidden, matches layout */}
             <div>
-              <p className="text-xs font-black text-navy/30 uppercase mb-1">Their Sketch</p>
-              <div className="relative" style={{ border: '3px solid #1A1A2E', maxWidth: '280px' }}>
-                <canvas
-                  ref={opponentCanvasRef} width={512} height={512}
-                  className="w-full"
-                  style={{ display: 'block', background: '#fff', aspectRatio: '1' }}
-                />
-                <div className="absolute inset-0" />
+              <p className="text-xs font-black text-primary uppercase mb-1">Their Prompt</p>
+              <div className="px-4 py-3 text-white/30 text-base font-medium italic"
+                style={{ border: '3px solid #FF2D55', background: 'rgba(255,45,85,0.08)', minHeight: '5.5rem' }}>
+                Hidden until voting...
               </div>
             </div>
+
+            {/* Hidden canvas for receiving opponent sketch data */}
+            <canvas ref={opponentCanvasRef} width={512} height={512} style={{ display: 'none' }} />
           </div>
         </div>
 
@@ -783,98 +792,158 @@ export default function PromptOffGame({ game }) {
     )
   }
 
-  // GENERATING
+  // GENERATING — show both live outputs while finals are being created
   if (phase === 'generating') {
     return (
-      <div className="flex flex-col gap-6 max-w-lg mx-auto">
-        <div className="brutalist-card p-12 text-center">
-          <div className="animate-spin rounded-full mx-auto mb-4"
-            style={{ width: 48, height: 48, border: '4px solid #1A1A2E', borderTopColor: 'transparent' }} />
-          <h3 className="font-black text-navy uppercase mb-2">Time's Up!</h3>
-          <p className="text-navy/50 text-sm font-medium">
-            {myFinalUrl ? 'Your image is ready! Waiting for opponent...' : 'Generating your final image...'}
-          </p>
-          <div className="flex justify-center gap-4 mt-4">
-            <span className={`text-xs font-black uppercase ${myFinalUrl ? 'text-green-600' : 'text-navy/30'}`}>
+      <div className="flex flex-col gap-4">
+        <div className="brutalist-card p-4 text-center">
+          <h3 className="font-black text-navy uppercase mb-1">Time's Up!</h3>
+          <p className="text-navy/50 text-sm font-medium">Generating final images...</p>
+          <div className="flex justify-center gap-6 mt-3">
+            <span className={`text-xs font-black uppercase ${myFinalUrl ? 'text-green-600' : 'text-navy/30 animate-pulse'}`}>
               {myFinalUrl ? '✓ You' : '⏳ You'}
             </span>
-            <span className={`text-xs font-black uppercase ${opponentFinalUrl ? 'text-green-600' : 'text-navy/30'}`}>
+            <span className={`text-xs font-black uppercase ${opponentFinalUrl ? 'text-green-600' : 'text-navy/30 animate-pulse'}`}>
               {opponentFinalUrl ? `✓ ${opponentName}` : `⏳ ${opponentName}`}
             </span>
+          </div>
+        </div>
+
+        {/* Show both live outputs side by side while waiting */}
+        <div className="grid grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-black text-accent uppercase text-center">You ({username})</p>
+            <div style={{ border: '3px solid #C8FF00', aspectRatio: '1', overflow: 'hidden' }}>
+              {(myFinalUrl || myLiveUrl) ? (
+                <img src={myFinalUrl || myLiveUrl} alt="Your output" className="w-full h-full"
+                  style={{ objectFit: 'cover', display: 'block' }} />
+              ) : (
+                <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">
+                  Generating...
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-black text-primary uppercase text-center">{opponentName}</p>
+            <div style={{ border: '3px solid #FF2D55', aspectRatio: '1', overflow: 'hidden' }}>
+              {(opponentFinalUrl || opponentLiveUrl) ? (
+                <img src={opponentFinalUrl || opponentLiveUrl} alt="Opponent output" className="w-full h-full"
+                  style={{ objectFit: 'cover', display: 'block' }} />
+              ) : (
+                <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">
+                  Waiting...
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
     )
   }
 
-  // JUDGING
-  if (phase === 'judging') {
+  // VOTING — both outputs visible, audience votes
+  if (phase === 'voting' || phase === 'judging') {
     return (
       <div className="flex flex-col gap-4">
+        {/* Header with prompt */}
         <div className="brutalist-card p-4 text-center">
-          <p className="text-xs font-black text-navy/40 uppercase mb-1">The prompt was</p>
+          <p className="text-[10px] font-black text-navy/40 uppercase mb-0.5">The prompt was</p>
           <p className="text-lg font-black text-navy">"{targetPrompt}"</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Both outputs side by side */}
+        <div className="grid grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
+          {/* Player A */}
           <div className="flex flex-col gap-2">
-            <p className="text-xs font-black text-accent uppercase">You ({username})</p>
-            {myFinalUrl ? (
-              <div style={{ border: '3px solid #C8FF00', overflow: 'hidden' }}>
-                <img src={myFinalUrl} alt="Your final" className="w-full" />
-              </div>
-            ) : (
-              <div className="flex items-center justify-center bg-navy/5 text-navy/30 text-sm font-bold"
-                style={{ border: '3px solid #1A1A2E22', minHeight: 200 }}>No image</div>
-            )}
-            <p className="text-xs text-navy/50 font-medium">
-              Prompt: <span className="text-navy font-bold">{myFinalPrompt}</span>
+            <p className="text-sm font-black text-accent uppercase text-center">You ({username})</p>
+            <div style={{ border: `3px solid ${myVote === myRole ? '#C8FF00' : '#1A1A2E'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}
+              className={`transition-all ${!myVote ? 'cursor-pointer hover:scale-[1.02]' : ''}`}
+              onClick={!myVote ? () => castVote(myRole) : undefined}>
+              {myFinalUrl ? (
+                <img src={myFinalUrl} alt="Your final" className="w-full h-full" style={{ objectFit: 'cover', display: 'block' }} />
+              ) : (
+                <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">No image</div>
+              )}
+              {!myVote && (
+                <div className="absolute inset-x-0 bottom-0 py-2 text-center text-xs font-black uppercase"
+                  style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.7))', color: '#C8FF00' }}>
+                  Click to vote
+                </div>
+              )}
+              {myVote === myRole && (
+                <div className="absolute top-2 right-2 px-2 py-1 text-xs font-black uppercase"
+                  style={{ background: '#C8FF00', color: '#1A1A2E' }}>
+                  Your Vote
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-white/50 font-medium text-center">
+              Prompt: <span className="text-white font-bold">{myFinalPrompt}</span>
             </p>
           </div>
+
+          {/* Player B */}
           <div className="flex flex-col gap-2">
-            <p className="text-xs font-black text-primary uppercase">{opponentName}</p>
-            {opponentFinalUrl ? (
-              <div style={{ border: '3px solid #FF2D55', overflow: 'hidden' }}>
-                <img src={opponentFinalUrl} alt="Opponent final" className="w-full" />
-              </div>
-            ) : (
-              <div className="flex items-center justify-center bg-navy/5 text-navy/30 text-sm font-bold"
-                style={{ border: '3px solid #1A1A2E22', minHeight: 200 }}>No image</div>
-            )}
-            <p className="text-xs text-navy/50 font-medium">
-              Prompt: <span className="text-navy font-bold">{opponentFinalPrompt}</span>
+            <p className="text-sm font-black text-primary uppercase text-center">{opponentName}</p>
+            <div style={{ border: `3px solid ${myVote && myVote !== myRole ? '#FF2D55' : '#1A1A2E'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}
+              className={`transition-all ${!myVote ? 'cursor-pointer hover:scale-[1.02]' : ''}`}
+              onClick={!myVote ? () => castVote(isHost ? 'guest' : 'host') : undefined}>
+              {opponentFinalUrl ? (
+                <img src={opponentFinalUrl} alt="Opponent final" className="w-full h-full" style={{ objectFit: 'cover', display: 'block' }} />
+              ) : (
+                <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">No image</div>
+              )}
+              {!myVote && (
+                <div className="absolute inset-x-0 bottom-0 py-2 text-center text-xs font-black uppercase"
+                  style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.7))', color: '#FF2D55' }}>
+                  Click to vote
+                </div>
+              )}
+              {myVote && myVote !== myRole && (
+                <div className="absolute top-2 right-2 px-2 py-1 text-xs font-black uppercase"
+                  style={{ background: '#FF2D55', color: '#fff' }}>
+                  Your Vote
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-white/50 font-medium text-center">
+              Prompt: <span className="text-white font-bold">{opponentFinalPrompt}</span>
             </p>
           </div>
         </div>
 
-        {/* Voting */}
+        {/* Voting UI */}
         {!myVote ? (
-          <div className="brutalist-card p-6 text-center">
-            <p className="text-xs font-black text-navy/40 uppercase mb-3">Which image better matches the prompt?</p>
-            <div className="flex gap-3 justify-center">
+          <div className="brutalist-card p-5 text-center">
+            <p className="text-sm font-black text-navy uppercase mb-2">Vote for the best image!</p>
+            <p className="text-xs text-navy/40 font-medium">Click on an image above, or use the buttons below</p>
+            <div className="flex gap-3 justify-center mt-3">
               <button onClick={() => castVote(myRole)}
-                className="flex-1 max-w-[200px] py-3 bg-accent text-navy font-black uppercase text-sm"
-                style={{ border: '2px solid #1A1A2E' }}>
-                Mine
+                className="flex-1 max-w-[200px] py-3 font-black uppercase text-sm transition-transform hover:scale-105"
+                style={{ border: '3px solid #C8FF00', background: 'rgba(200,255,0,0.1)', color: '#C8FF00' }}>
+                Vote: Mine
               </button>
               <button onClick={() => castVote(isHost ? 'guest' : 'host')}
-                className="flex-1 max-w-[200px] py-3 bg-primary text-white font-black uppercase text-sm"
-                style={{ border: '2px solid #1A1A2E' }}>
-                {opponentName}'s
+                className="flex-1 max-w-[200px] py-3 font-black uppercase text-sm transition-transform hover:scale-105"
+                style={{ border: '3px solid #FF2D55', background: 'rgba(255,45,85,0.1)', color: '#FF2D55' }}>
+                Vote: {opponentName}
               </button>
             </div>
           </div>
         ) : !winner ? (
-          <div className="brutalist-card p-6 text-center">
+          <div className="brutalist-card p-5 text-center">
+            <div className="animate-spin rounded-full mx-auto mb-2"
+              style={{ width: 24, height: 24, border: '3px solid #1A1A2E33', borderTopColor: '#1A1A2E' }} />
             <p className="text-sm font-bold text-navy/50">You voted! Waiting for {opponentName}...</p>
           </div>
         ) : (
           <div className="brutalist-card p-8 text-center">
-            <Trophy className={`w-12 h-12 mx-auto mb-3 ${iWon ? 'text-yellow-500' : theyWon ? 'text-navy/30' : 'text-navy/50'}`} />
-            <h3 className="text-2xl font-black text-navy uppercase mb-2">
+            <Trophy className={`w-14 h-14 mx-auto mb-3 ${iWon ? 'text-yellow-500' : theyWon ? 'text-navy/30' : 'text-navy/50'}`} />
+            <h3 className="text-3xl font-black text-navy uppercase mb-2">
               {winner === 'tie' ? "It's a Tie!" : iWon ? 'You Win!' : `${opponentName} Wins!`}
             </h3>
-            <p className="text-3xl font-black text-primary mb-1">
+            <p className="text-4xl font-black text-primary mb-1">
               +{iWon ? 200 : theyWon ? 50 : 100} pts
             </p>
             <p className="text-navy/40 text-xs font-medium mb-6">
