@@ -238,8 +238,15 @@ export default function PromptOffGame({ game }) {
   useEffect(() => {
     if (phase !== 'playing') return
     setTimeLeft(GAME_DURATION)
-    initCanvas(canvasRef.current)
-    initCanvas(opponentCanvasRef.current)
+    // Canvas may be inside a collapsed <details>, init when available
+    const initWhenReady = () => {
+      if (canvasRef.current) initCanvas(canvasRef.current)
+      if (opponentCanvasRef.current) initCanvas(opponentCanvasRef.current)
+    }
+    initWhenReady()
+    // Also observe for when canvas becomes available (details opened)
+    const observer = new MutationObserver(initWhenReady)
+    observer.observe(document.body, { childList: true, subtree: true })
     scoredRef.current = false
 
     // Try to set up real-time connection
@@ -267,6 +274,7 @@ export default function PromptOffGame({ game }) {
     }, 1000)
 
     return () => {
+      observer.disconnect()
       if (timerRef.current) clearInterval(timerRef.current)
       if (realtimeRef.current) { try { realtimeRef.current.close() } catch {} realtimeRef.current = null }
       if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
@@ -282,37 +290,59 @@ export default function PromptOffGame({ game }) {
 
   // ---------- REAL-TIME GENERATION ----------
 
+  function isCanvasBlank(canvas) {
+    if (!canvas) return true
+    const ctx = canvas.getContext('2d')
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+    // Check a sample of pixels — if all white, canvas is blank
+    for (let i = 0; i < data.length; i += 400) {
+      if (data[i] < 250 || data[i + 1] < 250 || data[i + 2] < 250) return false
+    }
+    return true
+  }
+
   function triggerRealtimeGeneration() {
     if (phaseRef.current !== 'playing') return
     const canvas = canvasRef.current
-    if (!canvas) return
-    const canvasData = canvas.toDataURL('image/jpeg', 0.5)
-    const prompt = myPromptRef.current.trim() || 'abstract shapes'
+    const prompt = myPromptRef.current.trim()
+    if (!prompt && (!canvas || isCanvasBlank(canvas))) return
 
-    // Try realtime connection first
-    if (realtimeRef.current) {
-      try {
-        realtimeRef.current.send({
-          prompt,
-          image_url: canvasData,
-          strength: 0.65,
-          num_inference_steps: 4,
-          guidance_scale: 1,
-          seed: 42,
-        })
-        return
-      } catch {
-        // Fall through to debounced approach
+    const blank = isCanvasBlank(canvas)
+
+    // If canvas has drawing, use image-to-image with realtime connection
+    if (!blank && canvas) {
+      const canvasData = canvas.toDataURL('image/jpeg', 0.5)
+      if (realtimeRef.current) {
+        try {
+          realtimeRef.current.send({
+            prompt: prompt || 'abstract shapes',
+            image_url: canvasData,
+            strength: 0.65,
+            num_inference_steps: 4,
+            guidance_scale: 1,
+            seed: 42,
+          })
+          return
+        } catch {
+          // Fall through to debounced approach
+        }
       }
     }
 
-    // Fallback: debounced standard generation
+    // Debounced generation — text-to-image if canvas blank, image-to-image otherwise
     if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
     generateDebounceRef.current = setTimeout(async () => {
       if (generatingRef.current) { pendingGenerateRef.current = true; return }
       generatingRef.current = true
       try {
-        const url = await generateFromSketch(prompt, canvasData)
+        let url
+        if (blank || !canvas) {
+          // Pure text-to-image
+          url = await generateImage(prompt || 'abstract art')
+        } else {
+          const canvasData = canvas.toDataURL('image/jpeg', 0.5)
+          url = await generateFromSketch(prompt || 'abstract shapes', canvasData)
+        }
         if (phaseRef.current === 'playing') {
           setMyLiveUrl(url)
           send({ type: 'live', url })
@@ -323,13 +353,14 @@ export default function PromptOffGame({ game }) {
         pendingGenerateRef.current = false
         triggerRealtimeGeneration()
       }
-    }, 1000)
+    }, 600)
   }
 
-  // Re-trigger generation when prompt text changes
+  // Re-trigger generation when prompt text changes — fast for real-time feel
   useEffect(() => {
     if (phase !== 'playing') return
-    const timeout = setTimeout(() => triggerRealtimeGeneration(), 800)
+    if (!myPromptText.trim()) return
+    const timeout = setTimeout(() => triggerRealtimeGeneration(), 400)
     return () => clearTimeout(timeout)
   }, [myPromptText, phase])
 
@@ -620,128 +651,131 @@ export default function PromptOffGame({ game }) {
     return (
       <div className="flex flex-col gap-3">
         {/* Target prompt + timer */}
-        <div className="brutalist-card p-3 flex items-center justify-between">
+        <div className="brutalist-card p-4 flex items-center justify-between">
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-black text-navy/40 uppercase mb-0.5">Recreate this</p>
-            <p className="text-sm font-black text-navy truncate">{targetPrompt}</p>
+            <p className="text-base font-black text-navy truncate">{targetPrompt}</p>
           </div>
-          <div className={`flex items-center gap-1.5 text-2xl font-black ml-3 tabular-nums ${timeLeft <= 10 ? 'text-red-500 animate-pulse' : 'text-navy'}`}>
-            <Clock className="w-5 h-5" />
+          <div className={`flex items-center gap-1.5 text-3xl font-black ml-4 tabular-nums ${timeLeft <= 10 ? 'text-red-500 animate-pulse' : 'text-navy'}`}>
+            <Clock className="w-6 h-6" />
             {timeLeft}s
           </div>
         </div>
 
-        {/* Two columns */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {/* Two columns: You vs Opponent */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* YOUR SIDE */}
-          <div className="flex flex-col gap-2">
-            <p className="text-xs font-black text-accent uppercase">You ({username})</p>
+          <div className="flex flex-col gap-3">
+            <p className="text-sm font-black text-accent uppercase">You ({username})</p>
 
-            {/* Canvas + AI output side by side */}
-            <div className="grid grid-cols-2 gap-2">
-              {/* Drawing canvas */}
-              <div>
-                <p className="text-[10px] font-black text-navy/30 uppercase mb-1">Draw</p>
+            {/* Prompt input — primary control */}
+            <textarea
+              value={myPromptText} onChange={(e) => setMyPromptText(e.target.value)}
+              placeholder="Start typing your prompt... the AI generates as you type!"
+              rows={3}
+              className="w-full px-4 py-3 text-navy text-base focus:outline-none font-semibold resize-none"
+              style={{ border: '3px solid #1A1A2E' }}
+              autoFocus
+            />
+
+            {/* AI output — HERO element, large */}
+            <div>
+              <p className="text-xs font-black text-navy/30 uppercase mb-1">AI Output (live)</p>
+              {myLiveUrl ? (
+                <div style={{ border: '3px solid #C8FF00', overflow: 'hidden' }}>
+                  <img src={myLiveUrl} alt="AI output" className="w-full"
+                    style={{ aspectRatio: '1', objectFit: 'cover', maxHeight: '480px' }} />
+                </div>
+              ) : (
+                <div className="flex items-center justify-center bg-navy/5 text-navy/20 text-sm font-bold uppercase"
+                  style={{ border: '3px dashed #1A1A2E22', aspectRatio: '1', maxHeight: '480px' }}>
+                  Type a prompt to generate an image
+                </div>
+              )}
+            </div>
+
+            {/* Optional sketch canvas — collapsible helper */}
+            <details className="group">
+              <summary className="text-xs font-black text-navy/40 uppercase cursor-pointer hover:text-navy/60 select-none">
+                + Sketch to guide the AI (optional)
+              </summary>
+              <div className="mt-2 flex flex-col gap-2">
                 <div style={{ border: '3px solid #1A1A2E' }}>
                   <canvas
-                    ref={canvasRef} width={400} height={400}
+                    ref={canvasRef} width={512} height={512}
                     className="w-full cursor-crosshair touch-none"
-                    style={{ display: 'block', background: '#fff', aspectRatio: '1' }}
+                    style={{ display: 'block', background: '#fff', aspectRatio: '1', maxHeight: '400px' }}
                     onMouseDown={handleDrawStart} onMouseMove={handleDrawMove}
                     onMouseUp={handleDrawEnd} onMouseLeave={handleDrawEnd}
                     onTouchStart={handleDrawStart} onTouchMove={handleDrawMove}
                     onTouchEnd={handleDrawEnd}
                   />
                 </div>
+                {/* Tools */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {BRUSH_COLORS.map(c => (
+                    <button key={c} onClick={() => setBrushColor(c)}
+                      className={`w-5 h-5 rounded-full border-2 transition-transform ${brushColor === c ? 'border-primary scale-125' : 'border-navy/20'}`}
+                      style={{ backgroundColor: c }} />
+                  ))}
+                  <div className="w-px h-5 bg-navy/10 mx-0.5" />
+                  {BRUSH_SIZES.map(s => (
+                    <button key={s} onClick={() => setBrushSize(s)}
+                      className={`flex items-center justify-center w-6 h-6 border-2 ${brushSize === s ? 'border-primary bg-primary/10' : 'border-navy/20'}`}>
+                      <span className="rounded-full bg-navy" style={{ width: Math.min(s, 12), height: Math.min(s, 12) }} />
+                    </button>
+                  ))}
+                  <button onClick={clearCanvas} className="ml-auto p-1 border-2 border-navy/20 hover:border-red-400 hover:bg-red-50" title="Clear">
+                    <Trash2 className="w-3.5 h-3.5 text-navy/50" />
+                  </button>
+                </div>
               </div>
-              {/* AI output */}
-              <div>
-                <p className="text-[10px] font-black text-navy/30 uppercase mb-1">AI Output (live)</p>
-                {myLiveUrl ? (
-                  <div style={{ border: '3px solid #C8FF00', overflow: 'hidden' }}>
-                    <img src={myLiveUrl} alt="AI output" className="w-full" style={{ aspectRatio: '1', objectFit: 'cover' }} />
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-center bg-navy/5 text-navy/20 text-[10px] font-bold uppercase"
-                    style={{ border: '3px dashed #1A1A2E22', aspectRatio: '1' }}>
-                    Draw & type to generate
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Tools */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {BRUSH_COLORS.map(c => (
-                <button key={c} onClick={() => setBrushColor(c)}
-                  className={`w-5 h-5 rounded-full border-2 transition-transform ${brushColor === c ? 'border-primary scale-125' : 'border-navy/20'}`}
-                  style={{ backgroundColor: c }} />
-              ))}
-              <div className="w-px h-5 bg-navy/10 mx-0.5" />
-              {BRUSH_SIZES.map(s => (
-                <button key={s} onClick={() => setBrushSize(s)}
-                  className={`flex items-center justify-center w-6 h-6 border-2 ${brushSize === s ? 'border-primary bg-primary/10' : 'border-navy/20'}`}>
-                  <span className="rounded-full bg-navy" style={{ width: Math.min(s, 12), height: Math.min(s, 12) }} />
-                </button>
-              ))}
-              <button onClick={clearCanvas} className="ml-auto p-1 border-2 border-navy/20 hover:border-red-400 hover:bg-red-50" title="Clear">
-                <Trash2 className="w-3.5 h-3.5 text-navy/50" />
-              </button>
-            </div>
-
-            {/* Prompt */}
-            <textarea
-              value={myPromptText} onChange={(e) => setMyPromptText(e.target.value)}
-              placeholder="Type your prompt..."
-              rows={2}
-              className="w-full px-3 py-2 text-navy text-sm focus:outline-none font-medium resize-none"
-              style={{ border: '3px solid #1A1A2E' }}
-            />
+            </details>
           </div>
 
           {/* OPPONENT SIDE */}
-          <div className="flex flex-col gap-2">
-            <p className="text-xs font-black text-primary uppercase">Opponent ({opponentName})</p>
+          <div className="flex flex-col gap-3">
+            <p className="text-sm font-black text-primary uppercase">Opponent ({opponentName})</p>
 
-            <div className="grid grid-cols-2 gap-2">
-              {/* Opponent canvas */}
-              <div>
-                <p className="text-[10px] font-black text-navy/30 uppercase mb-1">Their Drawing</p>
-                <div className="relative" style={{ border: '3px solid #1A1A2E' }}>
-                  <canvas
-                    ref={opponentCanvasRef} width={400} height={400}
-                    className="w-full"
-                    style={{ display: 'block', background: '#fff', aspectRatio: '1' }}
-                  />
-                  <div className="absolute inset-0" />
-                </div>
-              </div>
-              {/* Opponent AI output */}
-              <div>
-                <p className="text-[10px] font-black text-navy/30 uppercase mb-1">Their AI Output</p>
-                {opponentLiveUrl ? (
-                  <div style={{ border: '3px solid #FF2D55', overflow: 'hidden' }}>
-                    <img src={opponentLiveUrl} alt="Opponent AI" className="w-full" style={{ aspectRatio: '1', objectFit: 'cover' }} />
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-center bg-navy/5 text-navy/20 text-[10px] font-bold uppercase"
-                    style={{ border: '3px dashed #1A1A2E22', aspectRatio: '1' }}>
-                    Waiting...
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="px-3 py-2 bg-navy/5 text-navy/30 text-sm font-medium"
+            <div className="px-4 py-3 bg-navy/5 text-navy/30 text-base font-medium"
               style={{ border: '3px solid #1A1A2E22' }}>
               Prompt hidden until judging...
+            </div>
+
+            {/* Opponent AI output — large */}
+            <div>
+              <p className="text-xs font-black text-navy/30 uppercase mb-1">Their AI Output</p>
+              {opponentLiveUrl ? (
+                <div style={{ border: '3px solid #FF2D55', overflow: 'hidden' }}>
+                  <img src={opponentLiveUrl} alt="Opponent AI" className="w-full"
+                    style={{ aspectRatio: '1', objectFit: 'cover', maxHeight: '480px' }} />
+                </div>
+              ) : (
+                <div className="flex items-center justify-center bg-navy/5 text-navy/20 text-sm font-bold uppercase"
+                  style={{ border: '3px dashed #1A1A2E22', aspectRatio: '1', maxHeight: '480px' }}>
+                  Waiting for opponent...
+                </div>
+              )}
+            </div>
+
+            {/* Opponent canvas — smaller */}
+            <div>
+              <p className="text-xs font-black text-navy/30 uppercase mb-1">Their Sketch</p>
+              <div className="relative" style={{ border: '3px solid #1A1A2E', maxWidth: '280px' }}>
+                <canvas
+                  ref={opponentCanvasRef} width={512} height={512}
+                  className="w-full"
+                  style={{ display: 'block', background: '#fff', aspectRatio: '1' }}
+                />
+                <div className="absolute inset-0" />
+              </div>
             </div>
           </div>
         </div>
 
         {/* Submit early */}
         <button onClick={handleSubmitEarly} disabled={!myPromptText.trim()}
-          className="w-full py-2.5 bg-navy text-white font-black uppercase text-xs disabled:opacity-40"
+          className="w-full py-3 bg-navy text-white font-black uppercase text-sm disabled:opacity-40"
           style={{ border: '2px solid #1A1A2E' }}>
           Submit Final Image Early
         </button>
