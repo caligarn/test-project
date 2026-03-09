@@ -16,8 +16,10 @@ import StyleRouletteGame from '../games/StyleRouletteGame'
 import SpeedPromptGame from '../games/SpeedPromptGame'
 import DreamCaptionGame from '../games/DreamCaptionGame'
 import AIRemixGame from '../games/AIRemixGame'
+import PromptOffGame from '../games/PromptOffGame'
 
 const GAME_COMPONENTS = {
+  'prompt-off': PromptOffGame,
   'infinimap': InfinimapGame,
   'haiku-canvas': HaikuCanvasGame,
   'mosaic-maker': MosaicGame,

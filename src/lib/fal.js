@@ -87,3 +87,42 @@ export async function generateImageVariations(prompt, count = 4) {
     return result.data.images.map((img) => img.url)
   })
 }
+
+// Real-time image-to-image generation (Krea-style)
+export function connectRealtime(onResult, onError) {
+  isConfigured()
+  const connection = fal.realtime.connect('fal-ai/lcm-sd15-i2i', {
+    connectionKey: 'prompt-off-' + Math.random().toString(36).slice(2, 8),
+    throttleInterval: 200,
+    onResult: (result) => {
+      if (result?.images?.[0]?.url) {
+        onResult(result.images[0].url)
+      }
+    },
+    onError: (error) => {
+      console.warn('Realtime generation error:', error)
+      if (onError) onError(error)
+    },
+  })
+  return connection
+}
+
+// Standard image-to-image fallback
+export async function generateFromSketch(prompt, imageDataUrl, options = {}) {
+  const { strength = 0.65 } = options
+  return withRetry(async () => {
+    const result = await fal.subscribe('fal-ai/lcm-sd15-i2i', {
+      input: {
+        prompt,
+        image_url: imageDataUrl,
+        strength,
+        num_inference_steps: 4,
+        guidance_scale: 1,
+        num_images: 1,
+      },
+      pollInterval: 300,
+      timeout: 30000,
+    })
+    return result.data.images[0].url
+  }, 3, 500)
+}
