@@ -1,5 +1,6 @@
 import { fal } from '@fal-ai/client'
 
+const DEFAULT_KEY = '96d135df-dcc0-4449-bf1a-c27a64f3d39a:03687b0b7f91482a8765ac9e72e809f3'
 let configured = false
 
 export function configureFal(apiKey) {
@@ -23,6 +24,9 @@ export function isConfigured() {
       configureFal(saved)
       return true
     }
+    // Use default key
+    configureFal(DEFAULT_KEY)
+    return true
   }
   return configured
 }
