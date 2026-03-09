@@ -42,6 +42,7 @@ function promptSimilarity(playerPrompt, targetPrompt) {
 
 export default function PixelDuelGame({ game }) {
   const { user } = useAuth()
+  const username = user?.username || 'guest'
   const [round, setRound] = useState(1)
   const [totalScore, setTotalScore] = useState(0)
   const [targetUrl, setTargetUrl] = useState(null)
@@ -92,7 +93,7 @@ export default function PixelDuelGame({ game }) {
       const pts = Math.round(similarity * 1.5)
       setResult({ similarity, pts })
       setTotalScore(s => s + pts)
-      addScore(game.id, user.username, pts, { playerPrompt, targetPrompt, similarity })
+      addScore(game.id, username, pts, { playerPrompt, targetPrompt, similarity })
       setPhase('result')
     } catch {
       setError('Failed to generate your image.')

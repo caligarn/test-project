@@ -28,6 +28,7 @@ const STORAGE_KEY = 'ai_arcade_dream_captions'
 
 export default function DreamCaptionGame({ game }) {
   const { user } = useAuth()
+  const username = user?.username || 'guest'
   const [gallery, setGallery] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
   const [imageUrl, setImageUrl] = useState(null)
   const [dreamPrompt, setDreamPrompt] = useState(null)
@@ -67,7 +68,7 @@ export default function DreamCaptionGame({ game }) {
       id: Date.now(),
       imageUrl,
       caption: caption.trim(),
-      author: user.username,
+      author: username,
       votes: 0,
       pts,
     }
@@ -76,7 +77,7 @@ export default function DreamCaptionGame({ game }) {
     setGallery(updated)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
     setScore(s => s + pts)
-    addScore(game.id, user.username, pts, { caption: caption.trim() })
+    addScore(game.id, username, pts, { caption: caption.trim() })
     setPhase('submitted')
   }
 
@@ -99,7 +100,7 @@ export default function DreamCaptionGame({ game }) {
     <div className="flex flex-col gap-4">
       {/* Stats */}
       <div className="flex items-center justify-between brutalist-card p-4">
-        <div><p className="text-xs font-black text-navy/50 uppercase">Your Captions</p><p className="text-3xl font-black text-navy">{gallery.filter(g => g.author === user.username).length}</p></div>
+        <div><p className="text-xs font-black text-navy/50 uppercase">Your Captions</p><p className="text-3xl font-black text-navy">{gallery.filter(g => g.author === username).length}</p></div>
         <div className="text-center"><p className="text-xs font-black text-navy/50 uppercase">Gallery</p><p className="text-3xl font-black text-navy">{gallery.length}</p></div>
         <div className="text-right"><p className="text-xs font-black text-navy/50 uppercase">Score</p><p className="text-3xl font-black text-primary">{score}</p></div>
       </div>

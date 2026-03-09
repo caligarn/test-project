@@ -8,6 +8,7 @@ const ACCENT_COLORS = ['#FF2D55','#C8FF00','#FF6B35','#FFD600','#8B5CF6','#00D4F
 
 export default function MosaicGame({ game }) {
   const { user } = useAuth()
+  const username = user?.username || 'guest'
   const [pieces, setPieces] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
   const [prompt, setPrompt] = useState('')
   const [accent, setAccent] = useState(ACCENT_COLORS[0])
@@ -27,13 +28,13 @@ export default function MosaicGame({ game }) {
         `${prompt.trim()}, mosaic tile art, colorful geometric abstract, vibrant`,
         { width: 512, height: 512 }
       )
-      const piece = { id: Date.now(), url, prompt: prompt.trim(), accent, author: user.username }
+      const piece = { id: Date.now(), url, prompt: prompt.trim(), accent, author: username }
       const updated = [...pieces, piece].slice(-60)
       setPieces(updated)
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
       const pts = game.pointsPerAction || 60
       setScore(s => s + pts)
-      addScore(game.id, user.username, pts, { prompt })
+      addScore(game.id, username, pts, { prompt })
       setPrompt('')
       setShowForm(false)
     } catch (err) {
@@ -43,7 +44,7 @@ export default function MosaicGame({ game }) {
     }
   }
 
-  const mine = pieces.filter(p => p.author === user.username).length
+  const mine = pieces.filter(p => p.author === username).length
 
   return (
     <div className="flex flex-col gap-4">

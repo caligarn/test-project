@@ -9,6 +9,7 @@ const PANELS_PER_PAGE = 6
 
 export default function CommunityComicGame({ game }) {
   const { user } = useAuth()
+  const username = user?.username || 'guest'
   const [panels, setPanels] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
   const [page, setPage] = useState(0)
   const [showForm, setShowForm] = useState(false)
@@ -40,7 +41,7 @@ export default function CommunityComicGame({ game }) {
         id: Date.now(),
         url,
         text: text.trim(),
-        author: user.username,
+        author: username,
         panelNumber: panels.length + 1,
       }
       const updated = [...panels, panel]
@@ -48,7 +49,7 @@ export default function CommunityComicGame({ game }) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
       const pts = game.pointsPerAction || 80
       setScore(s => s + pts)
-      addScore(game.id, user.username, pts, { text })
+      addScore(game.id, username, pts, { text })
       setText('')
       setShowForm(false)
       // Jump to last page

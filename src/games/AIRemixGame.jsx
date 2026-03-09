@@ -18,6 +18,7 @@ const STORAGE_KEY = 'ai_arcade_remix_chains'
 
 export default function AIRemixGame({ game }) {
   const { user } = useAuth()
+  const username = user?.username || 'guest'
   const [chain, setChain] = useState([])
   const [currentPrompt, setCurrentPrompt] = useState('')
   const [phase, setPhase] = useState('start') // start, remixing, generating, viewing
@@ -64,14 +65,14 @@ export default function AIRemixGame({ game }) {
 
       const pts = 50 + (chain.length * 10) // increasing points per step
       setScore(s => s + pts)
-      addScore(game.id, user.username, pts, { step: updated.length, prompt: currentPrompt.trim() })
+      addScore(game.id, username, pts, { step: updated.length, prompt: currentPrompt.trim() })
 
       if (updated.length >= maxSteps) {
         // Save chain
         const chainEntry = {
           id: Date.now(),
           steps: updated,
-          author: user.username,
+          author: username,
         }
         const updatedChains = [chainEntry, ...savedChains].slice(0, 20)
         setSavedChains(updatedChains)

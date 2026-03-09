@@ -74,11 +74,12 @@ function TileCell({ tile, onClick, loading, coordLabel }) {
 
 export default function InfinimapGame({ game }) {
   const { user } = useAuth()
-  const [tiles, setTiles] = useState(() => loadTiles(user.username))
+  const username = user?.username || 'guest'
+  const [tiles, setTiles] = useState(() => loadTiles(username))
   const [loadingTile, setLoadingTile] = useState(null)
   const [prompt, setPrompt] = useState('')
   const [pendingCoord, setPendingCoord] = useState(null)
-  const [score, setScore] = useState(() => loadScore(user.username))
+  const [score, setScore] = useState(() => loadScore(username))
   const [error, setError] = useState(null)
 
   // Camera: which tile coords are at the top-left of the viewport
@@ -156,12 +157,12 @@ export default function InfinimapGame({ game }) {
     setError(null)
     try {
       const url = await generateImage(prompt.trim(), { width: 512, height: 512 })
-      const updated = { ...tiles, [key]: { url, prompt: prompt.trim(), author: user.username } }
+      const updated = { ...tiles, [key]: { url, prompt: prompt.trim(), author: username } }
       setTiles(updated)
-      saveTiles(user.username, updated)
+      saveTiles(username, updated)
       const pts = game.pointsPerAction || 50
       setScore(s => s + pts)
-      addScore(game.id, user.username, pts, { prompt: prompt.trim(), tile: key })
+      addScore(game.id, username, pts, { prompt: prompt.trim(), tile: key })
     } catch {
       setError('Generation failed — check your Fal.ai key.')
     } finally {

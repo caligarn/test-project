@@ -38,17 +38,6 @@ export default function PlayGame() {
   const [apiKey, setApiKey] = useState('')
   const [hasKey, setHasKey] = useState(isConfigured())
 
-  if (!user) {
-    return (
-      <div className="max-w-md mx-auto px-4 py-16 text-center">
-        <p className="text-4xl mb-4">🔒</p>
-        <p className="text-navy font-black text-lg mb-2 uppercase">Sign in Required</p>
-        <p className="text-navy/50 text-sm mb-4 font-medium">You need to be signed in to play games.</p>
-        <Link to="/login" className="btn-brutalist bg-primary text-white no-underline inline-flex">Sign In</Link>
-      </div>
-    )
-  }
-
   if (!game) {
     return (
       <div className="max-w-md mx-auto px-4 py-16 text-center">
@@ -68,7 +57,8 @@ export default function PlayGame() {
   }
 
   const GameComponent = GAME_COMPONENTS[gameId]
-  const credits = getCredits(user.username)
+  const username = user?.username || 'guest'
+  const credits = getCredits(username)
 
   // Gate with API key if needed
   if (GameComponent && !hasKey) {
@@ -103,8 +93,8 @@ export default function PlayGame() {
     )
   }
 
-  // No credits left — prompt to buy
-  if (GameComponent && credits <= 0) {
+  // No credits left — prompt to buy (only for signed-in users)
+  if (user && GameComponent && credits <= 0) {
     return (
       <div className="max-w-md mx-auto px-4 py-12">
         <button onClick={() => navigate(-1)}

@@ -29,6 +29,7 @@ const ART_STYLES = [
 
 export default function HaikuCanvasGame({ game }) {
   const { user } = useAuth()
+  const username = user?.username || 'guest'
   const [lines, setLines] = useState(['', '', ''])
   const [style, setStyle] = useState('watercolor')
   const [gallery, setGallery] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
@@ -52,13 +53,13 @@ export default function HaikuCanvasGame({ game }) {
         `${selectedStyle.prompt} artwork inspired by haiku: "${haiku}". Evocative, artistic, beautiful mood.`,
         { width: 768, height: 512 }
       )
-      const entry = { id: Date.now(), url, lines: [...lines], style, author: user.username }
+      const entry = { id: Date.now(), url, lines: [...lines], style, author: username }
       const updated = [entry, ...gallery].slice(0, 30)
       setGallery(updated)
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
       const pts = game.pointsPerAction || 75
       setScore(s => s + pts)
-      addScore(game.id, user.username, pts, { haiku })
+      addScore(game.id, username, pts, { haiku })
       setLines(['', '', ''])
     } catch (err) {
       setError('Generation failed — check your Fal.ai key and try again.')
@@ -71,7 +72,7 @@ export default function HaikuCanvasGame({ game }) {
     <div className="flex flex-col gap-6">
       {/* Stats */}
       <div className="flex items-center justify-between brutalist-card p-4">
-        <div><p className="text-xs font-black text-navy/50 uppercase">Your Haikus</p><p className="text-3xl font-black text-navy">{gallery.filter(g => g.author === user.username).length}</p></div>
+        <div><p className="text-xs font-black text-navy/50 uppercase">Your Haikus</p><p className="text-3xl font-black text-navy">{gallery.filter(g => g.author === username).length}</p></div>
         <div><p className="text-xs font-black text-navy/50 uppercase">Total Gallery</p><p className="text-3xl font-black text-navy">{gallery.length}</p></div>
         <div className="text-right"><p className="text-xs font-black text-navy/50 uppercase">Score</p><p className="text-3xl font-black text-primary">{score}</p></div>
       </div>

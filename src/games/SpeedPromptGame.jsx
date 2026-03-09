@@ -23,6 +23,7 @@ const CONCEPTS = [
 
 export default function SpeedPromptGame({ game }) {
   const { user } = useAuth()
+  const username = user?.username || 'guest'
   const [round, setRound] = useState(1)
   const [totalScore, setTotalScore] = useState(0)
   const [concept, setConcept] = useState(null)
@@ -105,7 +106,7 @@ export default function SpeedPromptGame({ game }) {
 
       setRoundScore(pts)
       setTotalScore(s => s + pts)
-      addScore(game.id, user.username, pts, { prompt: finalPrompt, concept: concept.concept, timeLeft })
+      addScore(game.id, username, pts, { prompt: finalPrompt, concept: concept.concept, timeLeft })
     } catch {
       setError('Generation failed — check your API key.')
       setRoundScore(0)
