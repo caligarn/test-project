@@ -133,6 +133,10 @@ export default function PromptOffGame({ game }) {
       case 'vote-room':
         setVoteRoomCode(msg.code)
         break
+      case 'vote-results':
+        setAudienceVotes({ A: msg.votesA, B: msg.votesB })
+        setVotingClosed(true)
+        break
       case 'rematch':
         resetGame()
         break
@@ -463,7 +467,8 @@ export default function PromptOffGame({ game }) {
     // Only the host creates the voting room
     if (!isHost) return
 
-    const code = roomCode || generateRoomCode()
+    // Use a fresh code for the voting room to avoid PeerJS ID conflicts
+    const code = generateRoomCode()
     setVoteRoomCode(code)
     setAudienceVotes({ A: 0, B: 0 })
     setAudienceCount(0)
@@ -514,16 +519,14 @@ export default function PromptOffGame({ game }) {
     }
   }, [phase])
 
-  // Guest receives vote room code from host
-  useEffect(() => {
-    // handled in handleMessage
-  }, [])
-
   function broadcastResults() {
     const results = { votesA: audienceVotes.A, votesB: audienceVotes.B }
+    // Send to all audience viewers
     voteConnectionsRef.current.forEach(conn => {
       if (conn.open) conn.send({ type: 'vote-results', results })
     })
+    // Send to the opponent (guest) via game connection
+    send({ type: 'vote-results', votesA: audienceVotes.A, votesB: audienceVotes.B })
     setVotingClosed(true)
   }
 
@@ -641,14 +644,19 @@ export default function PromptOffGame({ game }) {
   const theyWon = winner && winner !== 'tie' && winner !== myRole
 
   // Score on audience vote result
+  // A = host's image, B = guest's image
+  const myAudienceVotes = isHost ? audienceVotes.A : audienceVotes.B
+  const theirAudienceVotes = isHost ? audienceVotes.B : audienceVotes.A
+  const iWonAudience = votingClosed && myAudienceVotes > theirAudienceVotes
+  const theyWonAudience = votingClosed && theirAudienceVotes > myAudienceVotes
+  const audienceTie = votingClosed && myAudienceVotes === theirAudienceVotes
+  const myPoints = iWonAudience ? 200 : theyWonAudience ? 50 : 100
+
   useEffect(() => {
     if (votingClosed && !scoredRef.current) {
       scoredRef.current = true
-      const iWonAudience = audienceVotes.A > audienceVotes.B
-      const theyWonAudience = audienceVotes.B > audienceVotes.A
-      const pts = iWonAudience ? 200 : theyWonAudience ? 50 : 100
       const result = iWonAudience ? 'win' : theyWonAudience ? 'loss' : 'tie'
-      addScore(game.id, username, pts, { prompt: targetPrompt, result, votes: audienceVotes })
+      addScore(game.id, username, myPoints, { prompt: targetPrompt, result, myVotes: myAudienceVotes, theirVotes: theirAudienceVotes })
     }
   }, [votingClosed])
 
@@ -943,7 +951,9 @@ export default function PromptOffGame({ game }) {
     const totalVotes = audienceVotes.A + audienceVotes.B
     const pctA = totalVotes > 0 ? Math.round((audienceVotes.A / totalVotes) * 100) : 0
     const pctB = totalVotes > 0 ? Math.round((audienceVotes.B / totalVotes) * 100) : 0
-    const audienceWinner = votingClosed ? (audienceVotes.A > audienceVotes.B ? username : audienceVotes.B > audienceVotes.A ? opponentName : null) : null
+    // A = host, B = guest — map to "my" and "their" perspective
+    const hostName = isHost ? username : opponentName
+    const guestName = isHost ? opponentName : username
     const voteUrl = voteRoomCode ? `${window.location.origin}/vote/${voteRoomCode}` : ''
 
     return (
@@ -955,65 +965,72 @@ export default function PromptOffGame({ game }) {
         </div>
 
         {/* Both outputs side by side */}
-        <div className="grid grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
-          {/* Player A (you) */}
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-black text-accent uppercase text-center">{username}</p>
-            <div style={{ border: `3px solid ${votingClosed && audienceVotes.A >= audienceVotes.B ? '#C8FF00' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
-              {myFinalUrl ? (
-                <img src={myFinalUrl} alt="Your final" className="w-full h-full" style={{ objectFit: 'cover', display: 'block' }} />
-              ) : (
-                <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">No image</div>
-              )}
-              {votingClosed && audienceVotes.A > audienceVotes.B && (
-                <div className="absolute top-2 left-2 px-2 py-1 text-xs font-black uppercase"
-                  style={{ background: '#C8FF00', color: '#1A1A2E' }}>Winner</div>
-              )}
-            </div>
-            <p className="text-xs text-white/50 font-medium text-center">
-              <span className="text-white font-bold">{myFinalPrompt}</span>
-            </p>
-            {/* Vote bar */}
-            {totalVotes > 0 && (
-              <div className="w-full h-8 relative" style={{ border: '2px solid #C8FF00', background: '#1a1a2e' }}>
-                <div className="h-full transition-all duration-700" style={{ width: `${pctA}%`, background: '#C8FF00' }} />
-                <span className="absolute inset-0 flex items-center justify-center text-xs font-black"
-                  style={{ color: pctA > 50 ? '#1A1A2E' : '#C8FF00' }}>
-                  {pctA}% ({audienceVotes.A})
-                </span>
+        {(() => {
+          // A = host, B = guest. Map to "my" and "their" for correct display
+          const myVotes = isHost ? audienceVotes.A : audienceVotes.B
+          const theirVotes = isHost ? audienceVotes.B : audienceVotes.A
+          const myPct = totalVotes > 0 ? Math.round((myVotes / totalVotes) * 100) : 0
+          const theirPct = totalVotes > 0 ? Math.round((theirVotes / totalVotes) * 100) : 0
+          return (
+            <div className="grid grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
+              {/* Your image */}
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-black text-accent uppercase text-center">{username}</p>
+                <div style={{ border: `3px solid ${votingClosed && myVotes >= theirVotes ? '#C8FF00' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
+                  {myFinalUrl ? (
+                    <img src={myFinalUrl} alt="Your final" className="w-full h-full" style={{ objectFit: 'cover', display: 'block' }} />
+                  ) : (
+                    <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">No image</div>
+                  )}
+                  {votingClosed && myVotes > theirVotes && (
+                    <div className="absolute top-2 left-2 px-2 py-1 text-xs font-black uppercase"
+                      style={{ background: '#C8FF00', color: '#1A1A2E' }}>Winner</div>
+                  )}
+                </div>
+                <p className="text-xs text-white/50 font-medium text-center">
+                  <span className="text-white font-bold">{myFinalPrompt}</span>
+                </p>
+                {totalVotes > 0 && (
+                  <div className="w-full h-8 relative" style={{ border: '2px solid #C8FF00', background: '#1a1a2e' }}>
+                    <div className="h-full transition-all duration-700" style={{ width: `${myPct}%`, background: '#C8FF00' }} />
+                    <span className="absolute inset-0 flex items-center justify-center text-xs font-black"
+                      style={{ color: myPct > 50 ? '#1A1A2E' : '#C8FF00' }}>
+                      {myPct}% ({myVotes})
+                    </span>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          {/* Player B (opponent) */}
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-black text-primary uppercase text-center">{opponentName}</p>
-            <div style={{ border: `3px solid ${votingClosed && audienceVotes.B >= audienceVotes.A ? '#FF2D55' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
-              {opponentFinalUrl ? (
-                <img src={opponentFinalUrl} alt="Opponent final" className="w-full h-full" style={{ objectFit: 'cover', display: 'block' }} />
-              ) : (
-                <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">No image</div>
-              )}
-              {votingClosed && audienceVotes.B > audienceVotes.A && (
-                <div className="absolute top-2 left-2 px-2 py-1 text-xs font-black uppercase"
-                  style={{ background: '#FF2D55', color: '#fff' }}>Winner</div>
-              )}
-            </div>
-            <p className="text-xs text-white/50 font-medium text-center">
-              <span className="text-white font-bold">{opponentFinalPrompt}</span>
-            </p>
-            {/* Vote bar */}
-            {totalVotes > 0 && (
-              <div className="w-full h-8 relative" style={{ border: '2px solid #FF2D55', background: '#1a1a2e' }}>
-                <div className="h-full transition-all duration-700" style={{ width: `${pctB}%`, background: '#FF2D55' }} />
-                <span className="absolute inset-0 flex items-center justify-center text-xs font-black"
-                  style={{ color: pctB > 50 ? '#fff' : '#FF2D55' }}>
-                  {pctB}% ({audienceVotes.B})
-                </span>
+              {/* Opponent's image */}
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-black text-primary uppercase text-center">{opponentName}</p>
+                <div style={{ border: `3px solid ${votingClosed && theirVotes >= myVotes ? '#FF2D55' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
+                  {opponentFinalUrl ? (
+                    <img src={opponentFinalUrl} alt="Opponent final" className="w-full h-full" style={{ objectFit: 'cover', display: 'block' }} />
+                  ) : (
+                    <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">No image</div>
+                  )}
+                  {votingClosed && theirVotes > myVotes && (
+                    <div className="absolute top-2 left-2 px-2 py-1 text-xs font-black uppercase"
+                      style={{ background: '#FF2D55', color: '#fff' }}>Winner</div>
+                  )}
+                </div>
+                <p className="text-xs text-white/50 font-medium text-center">
+                  <span className="text-white font-bold">{opponentFinalPrompt}</span>
+                </p>
+                {totalVotes > 0 && (
+                  <div className="w-full h-8 relative" style={{ border: '2px solid #FF2D55', background: '#1a1a2e' }}>
+                    <div className="h-full transition-all duration-700" style={{ width: `${theirPct}%`, background: '#FF2D55' }} />
+                    <span className="absolute inset-0 flex items-center justify-center text-xs font-black"
+                      style={{ color: theirPct > 50 ? '#fff' : '#FF2D55' }}>
+                      {theirPct}% ({theirVotes})
+                    </span>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </div>
+            </div>
+          )
+        })()}
 
         {/* QR Code + Audience voting panel */}
         {!votingClosed ? (
@@ -1062,15 +1079,21 @@ export default function PromptOffGame({ game }) {
           </div>
         ) : (
           <div className="brutalist-card p-8 text-center">
-            <Trophy className={`w-14 h-14 mx-auto mb-3 ${audienceWinner === username ? 'text-yellow-500' : audienceWinner === opponentName ? 'text-navy/30' : 'text-navy/50'}`} />
+            <Trophy className={`w-14 h-14 mx-auto mb-3 ${iWonAudience ? 'text-yellow-500' : theyWonAudience ? 'text-navy/30' : 'text-navy/50'}`} />
             <h3 className="text-3xl font-black text-navy uppercase mb-2">
-              {!audienceWinner ? "It's a Tie!" : audienceWinner === username ? 'You Win!' : `${opponentName} Wins!`}
+              {audienceTie ? "It's a Tie!" : iWonAudience ? 'You Win!' : `${opponentName} Wins!`}
             </h3>
             <p className="text-white/40 text-sm font-medium mb-1">
               {totalVotes} vote{totalVotes !== 1 ? 's' : ''} from the audience
             </p>
-            <p className="text-4xl font-black text-primary mb-4">
-              {audienceVotes.A} — {audienceVotes.B}
+            <p className="text-lg font-bold text-white/60 mb-2">
+              {hostName}: {audienceVotes.A} vote{audienceVotes.A !== 1 ? 's' : ''} — {guestName}: {audienceVotes.B} vote{audienceVotes.B !== 1 ? 's' : ''}
+            </p>
+            <p className="text-4xl font-black mb-1" style={{ color: iWonAudience ? '#C8FF00' : theyWonAudience ? '#FF2D55' : '#fff' }}>
+              +{myPoints} pts
+            </p>
+            <p className="text-navy/40 text-xs font-medium mb-6">
+              {iWonAudience ? 'The audience chose you!' : theyWonAudience ? 'Better luck next time!' : 'The audience was split!'}
             </p>
             {connected && (
               <button onClick={requestRematch}
