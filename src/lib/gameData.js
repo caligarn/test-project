@@ -1,5 +1,13 @@
 export const GAMES = [
   {
+    id: 'prompt-off',
+    title: 'Prompt Off',
+    tagline: 'Head-to-head AI art battle',
+    description: 'Two players compete in real-time to create the best AI image from a random prompt. Draw on a canvas, type prompts, and watch the AI generate live — Krea-style. Spectators vote for the winner!',
+    icon: '🥊', color: '#14B8A6', bgClass: 'bg-[#14B8A6]',
+    category: 'speed', difficulty: 'Medium', players: '2', featured: true, isNew: true, pointsPerAction: 200,
+  },
+  {
     id: 'prompt-guesser',
     title: 'Prompt Guesser',
     tagline: 'Decode the AI\'s imagination',
