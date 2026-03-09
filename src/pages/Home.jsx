@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Search, Sparkles, Zap } from 'lucide-react'
 import GameCard from '../components/GameCard'
 import AdBanner from '../components/AdBanner'
+import BannerAd from '../components/BannerAd'
 import { ALL_GAMES, CATEGORIES, getGamesByCategory, getFeaturedGames, MINIGAMES } from '../lib/gameData'
 
 export default function Home() {
@@ -90,6 +91,9 @@ export default function Home() {
           <p className="text-navy/50 font-medium">No games found.</p>
         </div>
       )}
+
+      {/* Bottom banner ad */}
+      <BannerAd slot="top" className="mt-8" />
     </div>
   )
 }

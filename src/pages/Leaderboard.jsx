@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Trophy, Medal, TrendingUp } from 'lucide-react'
 import { getLeaderboard } from '../lib/storage'
 import { GAMES } from '../lib/gameData'
+import BannerAd from '../components/BannerAd'
 
 export default function Leaderboard() {
   const [searchParams] = useSearchParams()
@@ -110,6 +111,9 @@ export default function Leaderboard() {
           </div>
         </div>
       )}
+
+      {/* Ad between podium and list */}
+      <BannerAd slot="inline" className="mb-6" />
 
       {/* Full List */}
       <div className="brutalist-card overflow-hidden">
