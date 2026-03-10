@@ -69,6 +69,14 @@ export default function PlayGame() {
         </div>
       </div>
 
+      {/* How to play */}
+      {game.howToPlay && (
+        <div className="mb-6 p-4 rounded-lg border-2 border-navy/10 bg-navy/[0.03]">
+          <p className="text-xs font-bold uppercase text-navy/40 mb-1">How to Play</p>
+          <p className="text-sm text-navy/70 font-medium leading-relaxed">{game.howToPlay}</p>
+        </div>
+      )}
+
       {/* Render live game */}
       {GameComponent ? (
         <Suspense fallback={
