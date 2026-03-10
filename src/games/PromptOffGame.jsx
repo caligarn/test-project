@@ -197,19 +197,48 @@ export default function PromptOffGame({ game }) {
 
   // ---------- ROOM CREATION / JOINING ----------
 
+  const hostRetryRef = useRef(0)
+  const HOST_MAX_RETRIES = 2
+
   function createRoom() {
-    setError(null)
+    hostRetryRef.current = 0
     const code = generateRoomCode()
     setRoomCode(code)
+    attemptCreateRoom(code)
+  }
+
+  function attemptCreateRoom(code) {
+    setError(null)
     setIsHost(true)
     setPhase('waiting')
+    // Clean up any previous peer without resetting phase
+    if (connRef.current) { connRef.current.close(); connRef.current = null }
+    if (peerRef.current) { peerRef.current.destroy(); peerRef.current = null }
+
     const peer = new Peer(`promptoff-${code}`)
     peerRef.current = peer
+    peer.on('open', () => {
+      hostRetryRef.current = 0 // Reset retries on successful connection to signaling server
+    })
     peer.on('connection', (conn) => setupConn(conn))
     peer.on('error', (err) => {
-      setError(err.type === 'unavailable-id' ? 'Room code taken. Try again.' : 'Connection failed. Check your network.')
-      setPhase('lobby')
-      cleanupPeer()
+      if (err.type === 'unavailable-id') {
+        // Room code collision — generate a new code and retry
+        const newCode = generateRoomCode()
+        setRoomCode(newCode)
+        attemptCreateRoom(newCode)
+        return
+      }
+      if (hostRetryRef.current < HOST_MAX_RETRIES) {
+        hostRetryRef.current++
+        setError(`Connection failed. Retrying... (attempt ${hostRetryRef.current + 1})`)
+        const delay = 1000 * Math.pow(2, hostRetryRef.current - 1)
+        setTimeout(() => attemptCreateRoom(code), delay)
+      } else {
+        setError('Could not create room. Check your network and try again.')
+        setPhase('lobby')
+        cleanupPeer()
+      }
     })
   }
 
@@ -227,7 +256,9 @@ export default function PromptOffGame({ game }) {
     setError(null)
     setIsHost(false)
     setPhase('waiting')
-    cleanupPeer()
+    // Clean up previous peer without full state reset
+    if (connRef.current) { connRef.current.close(); connRef.current = null }
+    if (peerRef.current) { peerRef.current.destroy(); peerRef.current = null }
 
     const peer = new Peer()
     peerRef.current = peer
@@ -249,7 +280,14 @@ export default function PromptOffGame({ game }) {
         }
       }, 8000)
     })
-    peer.on('error', () => {
+    peer.on('error', (err) => {
+      // peer-unavailable = room doesn't exist, no point retrying
+      if (err.type === 'peer-unavailable') {
+        setError('Room not found. Check the code and make sure the host is waiting.')
+        setPhase('lobby')
+        cleanupPeer()
+        return
+      }
       if (joinRetryRef.current < JOIN_MAX_RETRIES) {
         joinRetryRef.current++
         setError(`Connection failed. Retrying... (attempt ${joinRetryRef.current + 1})`)
