@@ -15,7 +15,7 @@ import VotePage from './pages/VotePage'
 export default function App() {
   return (
     <AuthProvider>
-      <div className="min-h-screen flex flex-col bg-[#13131F]">
+      <div className="min-h-screen flex flex-col bg-white">
         <Header />
         <main className="flex-1 pb-20 md:pb-4">
           <Routes>
