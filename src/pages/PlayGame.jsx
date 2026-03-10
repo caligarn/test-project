@@ -58,7 +58,6 @@ export default function PlayGame() {
         <div className="flex items-center gap-2">
           <span className="text-xl">{game.icon}</span>
           <span className="font-black text-navy uppercase">{game.title}</span>
-          {game.isNew && <span className="tag tag-yellow text-xs">New</span>}
         </div>
         <div className="flex items-center gap-1 text-xs font-black text-navy/50">
           <Coins className="w-3.5 h-3.5" />

@@ -56,9 +56,6 @@ export default function GameDetail() {
         <div className="relative z-10">
           <span className="text-5xl md:text-6xl mb-4 block">{game.icon}</span>
           <div className="flex items-center gap-2 mb-2">
-            {game.isNew && (
-              <span className="tag tag-yellow">New</span>
-            )}
             <span
               className={`tag ${
                 game.difficulty === 'Easy'

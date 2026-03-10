@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { Search, Sparkles, Users, Gamepad2 } from 'lucide-react'
+import { Search, Sparkles, Users, Gamepad2, Brush } from 'lucide-react'
 import GameCard from '../components/GameCard'
 import AdBanner from '../components/AdBanner'
 import BannerAd from '../components/BannerAd'
-import { ALL_GAMES, ICEBREAKERS, NEW_GAMES } from '../lib/gameData'
+import { ALL_GAMES, ICEBREAKERS, NEW_GAMES, CROWD_GRAFFITI } from '../lib/gameData'
 
 export default function Home() {
   const [search, setSearch] = useState('')
@@ -12,6 +12,7 @@ export default function Home() {
     search ? games.filter((g) => g.title.toLowerCase().includes(search.toLowerCase())) : games
 
   const icebreakers = filterBySearch(ICEBREAKERS)
+  const crowdGraffiti = filterBySearch(CROWD_GRAFFITI)
   const newGames = filterBySearch(NEW_GAMES)
 
   return (
@@ -78,6 +79,22 @@ export default function Home() {
         </section>
       )}
 
+      {/* CROWD GRAFFITI Section */}
+      {crowdGraffiti.length > 0 && (
+        <section className="mb-10">
+          <div className="flex items-center gap-2 mb-4">
+            <Brush className="w-5 h-5 text-[#E11D48]" />
+            <h2 className="text-xl font-black text-navy uppercase tracking-tight">Crowd Graffiti</h2>
+            <span className="ml-2 px-2 py-0.5 text-[10px] font-black uppercase bg-[#E11D48] text-white">
+              Collaborative
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {crowdGraffiti.map((game) => <GameCard key={game.id} game={game} />)}
+          </div>
+        </section>
+      )}
+
       {/* NEW GAMES Section */}
       {newGames.length > 0 && (
         <section className="mb-10">
@@ -94,7 +111,7 @@ export default function Home() {
         </section>
       )}
 
-      {icebreakers.length === 0 && newGames.length === 0 && (
+      {icebreakers.length === 0 && crowdGraffiti.length === 0 && newGames.length === 0 && (
         <div className="text-center py-16">
           <p className="text-4xl mb-3">🎮</p>
           <p className="text-navy/50 font-medium">No games found.</p>
