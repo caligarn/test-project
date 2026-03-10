@@ -62,6 +62,33 @@ export const GAMES = [
     category: 'creative', difficulty: 'Hard', players: '678', pointsPerAction: 50,
     section: 'new',
   },
+  {
+    id: 'spot-the-fake',
+    title: 'Spot the Fake',
+    tagline: 'Find the odd one out',
+    description: 'Four AI images — three match the same prompt, one is the imposter. Can you spot the fake before time runs out?',
+    icon: '🕵️', color: '#0D9488', bgClass: 'bg-[#0D9488]',
+    category: 'puzzle', difficulty: 'Medium', players: '0', pointsPerAction: 100,
+    section: 'new',
+  },
+  {
+    id: 'telephone',
+    title: 'Telephone',
+    tagline: 'Watch the message drift',
+    description: 'Write a prompt, AI draws it, then describe what you see — repeat 5 times and watch how far the image drifts from the original!',
+    icon: '📞', color: '#D946EF', bgClass: 'bg-[#D946EF]',
+    category: 'creative', difficulty: 'Easy', players: '0', pointsPerAction: 80,
+    section: 'icebreakers',
+  },
+  {
+    id: 'emoji-prompt',
+    title: 'Emoji Prompt',
+    tagline: 'Speak only in emoji',
+    description: 'Build an AI image prompt using only emojis! Tap from a huge selection to describe your scene — no words allowed. Best emoji art wins!',
+    icon: '😎', color: '#F59E0B', bgClass: 'bg-[#F59E0B]',
+    category: 'creative', difficulty: 'Easy', players: '0', pointsPerAction: 100,
+    section: 'icebreakers',
+  },
 ]
 
 export const MINIGAMES = [
@@ -104,6 +131,16 @@ export const MINIGAMES = [
     category: 'creative', difficulty: 'Easy', players: '0',
     pointsPerAction: 80,
     section: 'icebreakers',
+  },
+  {
+    id: 'before-after',
+    title: 'Before & After',
+    tagline: 'Transform the scene',
+    description: 'See a "before" scene and reimagine its future — underwater, overgrown, year 3000. The gallery shows every transformation side by side!',
+    icon: '🔮', color: '#059669', bgClass: 'bg-[#059669]',
+    category: 'creative', difficulty: 'Easy', players: '0',
+    pointsPerAction: 75,
+    section: 'crowd-graffiti',
   },
 ]
 

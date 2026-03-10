@@ -19,6 +19,10 @@ const GAME_COMPONENTS = {
   'speed-prompt': lazy(() => import('../games/SpeedPromptGame')),
   'dream-caption': lazy(() => import('../games/DreamCaptionGame')),
   'ai-remix': lazy(() => import('../games/AIRemixGame')),
+  'telephone': lazy(() => import('../games/TelephoneGame')),
+  'spot-the-fake': lazy(() => import('../games/SpotTheFakeGame')),
+  'before-after': lazy(() => import('../games/BeforeAfterGame')),
+  'emoji-prompt': lazy(() => import('../games/EmojiPromptGame')),
 }
 
 export default function PlayGame() {
