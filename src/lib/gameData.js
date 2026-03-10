@@ -130,14 +130,6 @@ export function getGamesByCategory(category) {
   return ALL_GAMES.filter((g) => g.category === category)
 }
 
-export function getAllGamesByCategory(category) {
-  return getGamesByCategory(category)
-}
-
-export function getFeaturedGames() {
-  return ALL_GAMES.filter((g) => g.featured)
-}
-
 export function getAllGames() {
   return ALL_GAMES
 }
