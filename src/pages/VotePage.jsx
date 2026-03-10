@@ -14,9 +14,18 @@ export default function VotePage() {
   const [results, setResults] = useState(null)
   const connRef = useRef(null)
   const peerRef = useRef(null)
+  const statusRef = useRef(status)
+  const retryCountRef = useRef(0)
+  const MAX_RETRIES = 3
 
-  useEffect(() => {
-    if (!code) return
+  useEffect(() => { statusRef.current = status }, [status])
+
+  const connectToPeer = (code) => {
+    // Cleanup previous attempt
+    if (connRef.current) { connRef.current.close(); connRef.current = null }
+    if (peerRef.current) { peerRef.current.destroy(); peerRef.current = null }
+
+    setStatus('connecting')
     const peer = new Peer()
     peerRef.current = peer
 
@@ -25,7 +34,7 @@ export default function VotePage() {
       connRef.current = conn
 
       conn.on('open', () => {
-        setStatus('connecting')
+        retryCountRef.current = 0
         conn.send({ type: 'viewer-hello' })
       })
 
@@ -49,19 +58,54 @@ export default function VotePage() {
       })
 
       conn.on('close', () => {
-        if (status === 'connecting') setStatus('error')
+        // Use ref to avoid stale closure over status
+        if (statusRef.current === 'connecting' || statusRef.current === 'voting') {
+          if (retryCountRef.current < MAX_RETRIES) {
+            retryCountRef.current++
+            const delay = 1000 * Math.pow(2, retryCountRef.current - 1)
+            setTimeout(() => connectToPeer(code), delay)
+          } else {
+            setStatus('error')
+          }
+        }
       })
 
-      conn.on('error', () => setStatus('error'))
+      conn.on('error', () => {
+        if (retryCountRef.current < MAX_RETRIES) {
+          retryCountRef.current++
+          const delay = 1000 * Math.pow(2, retryCountRef.current - 1)
+          setTimeout(() => connectToPeer(code), delay)
+        } else {
+          setStatus('error')
+        }
+      })
 
       setTimeout(() => {
-        if (!connRef.current?.open) {
-          setStatus('error')
+        if (!connRef.current?.open && statusRef.current === 'connecting') {
+          if (retryCountRef.current < MAX_RETRIES) {
+            retryCountRef.current++
+            connectToPeer(code)
+          } else {
+            setStatus('error')
+          }
         }
       }, 10000)
     })
 
-    peer.on('error', () => setStatus('error'))
+    peer.on('error', () => {
+      if (retryCountRef.current < MAX_RETRIES) {
+        retryCountRef.current++
+        const delay = 1000 * Math.pow(2, retryCountRef.current - 1)
+        setTimeout(() => connectToPeer(code), delay)
+      } else {
+        setStatus('error')
+      }
+    })
+  }
+
+  useEffect(() => {
+    if (!code) return
+    connectToPeer(code)
 
     return () => {
       if (connRef.current) connRef.current.close()

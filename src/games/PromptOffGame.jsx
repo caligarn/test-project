@@ -165,13 +165,21 @@ export default function PromptOffGame({ game }) {
     conn.on('data', handleMessage)
     conn.on('close', () => {
       setConnected(false)
-      if (phaseRef.current === 'playing' || phaseRef.current === 'countdown') {
+      const p = phaseRef.current
+      if (p === 'playing' || p === 'countdown') {
         setError('Opponent disconnected!')
         setPhase('lobby')
         cleanupPeer()
+      } else if (p === 'generating') {
+        setError('Opponent disconnected during image generation. Results may be incomplete.')
+      } else if (p === 'voting') {
+        setError('Opponent disconnected. Voting continues with audience votes.')
       }
     })
-    conn.on('error', () => setError('Connection error. Try again.'))
+    conn.on('error', (err) => {
+      console.warn('PeerJS connection error:', err)
+      setError('Connection error. Try again.')
+    })
   }, [username, handleMessage])
 
   function cleanupPeer() {
@@ -205,29 +213,53 @@ export default function PromptOffGame({ game }) {
     })
   }
 
+  const joinRetryRef = useRef(0)
+  const JOIN_MAX_RETRIES = 2
+
   function joinRoom(e) {
     e.preventDefault()
     if (!joinCode.trim()) return
+    joinRetryRef.current = 0
+    attemptJoin(joinCode.trim().toUpperCase())
+  }
+
+  function attemptJoin(code) {
     setError(null)
     setIsHost(false)
+    setPhase('waiting')
+    cleanupPeer()
+
     const peer = new Peer()
     peerRef.current = peer
     peer.on('open', () => {
-      const conn = peer.connect(`promptoff-${joinCode.trim().toUpperCase()}`, { reliable: true })
+      const conn = peer.connect(`promptoff-${code}`, { reliable: true })
       setupConn(conn)
-      setPhase('waiting')
       setTimeout(() => {
         if (!connRef.current?.open) {
-          setError('Could not connect. Check the room code.')
-          setPhase('lobby')
-          cleanupPeer()
+          if (joinRetryRef.current < JOIN_MAX_RETRIES) {
+            joinRetryRef.current++
+            setError(`Retrying connection... (attempt ${joinRetryRef.current + 1})`)
+            const delay = 1000 * Math.pow(2, joinRetryRef.current - 1)
+            setTimeout(() => attemptJoin(code), delay)
+          } else {
+            setError('Could not connect. Check the room code and try again.')
+            setPhase('lobby')
+            cleanupPeer()
+          }
         }
-      }, 10000)
+      }, 8000)
     })
     peer.on('error', () => {
-      setError('Could not connect. Check the room code.')
-      setPhase('lobby')
-      cleanupPeer()
+      if (joinRetryRef.current < JOIN_MAX_RETRIES) {
+        joinRetryRef.current++
+        setError(`Connection failed. Retrying... (attempt ${joinRetryRef.current + 1})`)
+        const delay = 1000 * Math.pow(2, joinRetryRef.current - 1)
+        setTimeout(() => attemptJoin(code), delay)
+      } else {
+        setError('Could not connect. Check the room code and try again.')
+        setPhase('lobby')
+        cleanupPeer()
+      }
     })
   }
 
@@ -275,10 +307,15 @@ export default function PromptOffGame({ game }) {
           setMyLiveUrl(url)
           send({ type: 'live', url })
         },
-        () => { /* errors handled silently for realtime */ }
+        (err) => {
+          console.warn('Realtime generation error:', err)
+          // Realtime failed — debounced generation will be used as fallback
+          realtimeRef.current = null
+        }
       )
     } catch {
       // Realtime not available — fallback to debounced generation
+      console.warn('Realtime connection unavailable, using debounced generation')
     }
 
     timerRef.current = setInterval(() => {
@@ -508,7 +545,10 @@ export default function PromptOffGame({ game }) {
       })
     })
 
-    votePeer.on('error', () => { /* ignore voting peer errors */ })
+    votePeer.on('error', (err) => {
+      console.warn('Vote peer error:', err)
+      setError('Voting room failed to start. Audience voting may not work.')
+    })
 
     // Also tell the opponent the vote room code
     send({ type: 'vote-room', code })
