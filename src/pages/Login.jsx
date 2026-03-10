@@ -51,7 +51,7 @@ export default function Login() {
         <p className="text-navy/50 text-sm font-medium">
           {mode === 'login'
             ? 'Sign in to track your scores'
-            : 'Join the AI Arcade community'}
+            : 'Join the Gen Arcade community'}
         </p>
       </div>
 

@@ -1,17 +1,19 @@
 import { useState } from 'react'
-import { Search, Sparkles, Zap } from 'lucide-react'
+import { Search, Sparkles, Users, Gamepad2, Brush } from 'lucide-react'
 import GameCard from '../components/GameCard'
 import AdBanner from '../components/AdBanner'
 import BannerAd from '../components/BannerAd'
-import { ALL_GAMES, CATEGORIES, getGamesByCategory, getFeaturedGames, MINIGAMES } from '../lib/gameData'
+import { ALL_GAMES, ICEBREAKERS, NEW_GAMES, CROWD_GRAFFITI } from '../lib/gameData'
 
 export default function Home() {
-  const [category, setCategory] = useState('all')
   const [search, setSearch] = useState('')
 
-  const games = getGamesByCategory(category).filter((g) =>
-    g.title.toLowerCase().includes(search.toLowerCase())
-  )
+  const filterBySearch = (games) =>
+    search ? games.filter((g) => g.title.toLowerCase().includes(search.toLowerCase())) : games
+
+  const icebreakers = filterBySearch(ICEBREAKERS)
+  const crowdGraffiti = filterBySearch(CROWD_GRAFFITI)
+  const newGames = filterBySearch(NEW_GAMES)
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
@@ -50,42 +52,66 @@ export default function Home() {
 
       <AdBanner />
 
-      {/* New Minigames Banner */}
-      <div className="mb-6 p-4 flex items-center gap-3" style={{ border: '3px solid #C8FF00', background: 'rgba(200,255,0,0.08)' }}>
-        <Zap className="w-5 h-5 text-navy flex-none" />
-        <div>
-          <span className="font-black text-navy uppercase text-sm">New! </span>
-          <span className="text-navy/70 text-sm font-medium">
-            {MINIGAMES.map(g => `${g.icon} ${g.title}`).join(' · ')} — live AI minigames, playable now.
-          </span>
-        </div>
-      </div>
-
-      {/* Search + Filter */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-6">
-        <div className="relative flex-1 w-full sm:max-w-xs">
+      {/* Search */}
+      <div className="flex items-center gap-3 mb-8">
+        <div className="relative flex-1 max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-navy/40" />
           <input type="text" placeholder="Search games..." value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-9 pr-4 py-2 border-3 border-navy bg-white text-sm text-navy placeholder-navy/40 focus:outline-none focus:ring-2 focus:ring-highlight font-medium"
             style={{ borderWidth: '3px' }} />
         </div>
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-          {CATEGORIES.map((cat) => (
-            <button key={cat.id} onClick={() => setCategory(cat.id)}
-              className={`px-3 py-1.5 text-xs font-black uppercase whitespace-nowrap transition-colors border-2 border-navy ${category === cat.id ? 'bg-navy text-white' : 'bg-white text-navy hover:bg-surface-light'}`}>
-              {cat.icon} {cat.label}
-            </button>
-          ))}
-        </div>
       </div>
 
-      {/* Games Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {games.map((game) => <GameCard key={game.id} game={game} />)}
-      </div>
+      {/* ICEBREAKERS Section */}
+      {icebreakers.length > 0 && (
+        <section className="mb-10">
+          <div className="flex items-center gap-2 mb-4">
+            <Users className="w-5 h-5 text-[#FF2D55]" />
+            <h2 className="text-xl font-black text-navy uppercase tracking-tight">Icebreakers</h2>
+            <span className="ml-2 px-2 py-0.5 text-[10px] font-black uppercase bg-[#FF2D55] text-white">
+              Multiplayer
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {icebreakers.map((game) => <GameCard key={game.id} game={game} />)}
+          </div>
+        </section>
+      )}
 
-      {games.length === 0 && (
+      {/* CROWD GRAFFITI Section */}
+      {crowdGraffiti.length > 0 && (
+        <section className="mb-10">
+          <div className="flex items-center gap-2 mb-4">
+            <Brush className="w-5 h-5 text-[#E11D48]" />
+            <h2 className="text-xl font-black text-navy uppercase tracking-tight">Crowd Graffiti</h2>
+            <span className="ml-2 px-2 py-0.5 text-[10px] font-black uppercase bg-[#E11D48] text-white">
+              Collaborative
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {crowdGraffiti.map((game) => <GameCard key={game.id} game={game} />)}
+          </div>
+        </section>
+      )}
+
+      {/* NEW GAMES Section */}
+      {newGames.length > 0 && (
+        <section className="mb-10">
+          <div className="flex items-center gap-2 mb-4">
+            <Gamepad2 className="w-5 h-5 text-[#C8FF00]" />
+            <h2 className="text-xl font-black text-navy uppercase tracking-tight">New Games</h2>
+            <span className="ml-2 px-2 py-0.5 text-[10px] font-black uppercase bg-[#C8FF00] text-navy">
+              Fresh
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {newGames.map((game) => <GameCard key={game.id} game={game} />)}
+          </div>
+        </section>
+      )}
+
+      {icebreakers.length === 0 && crowdGraffiti.length === 0 && newGames.length === 0 && (
         <div className="text-center py-16">
           <p className="text-4xl mb-3">🎮</p>
           <p className="text-navy/50 font-medium">No games found.</p>

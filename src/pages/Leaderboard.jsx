@@ -27,7 +27,7 @@ export default function Leaderboard() {
           Leaderboard
         </h1>
         <p className="text-navy/50 text-sm mt-1 font-medium">
-          Top players across all AI Arcade games
+          Top players across all Gen Arcade games
         </p>
       </div>
 

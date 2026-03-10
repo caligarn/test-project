@@ -13,7 +13,7 @@ export default function Header() {
             <Gamepad2 className="w-5 h-5 text-white" />
           </div>
           <span className="text-lg font-black text-white uppercase tracking-tight hidden sm:block">
-            AI Arcade
+            Gen Arcade
           </span>
         </Link>
 

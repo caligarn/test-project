@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Users, Zap } from 'lucide-react'
+import { Users } from 'lucide-react'
 
 export default function GameCard({ game, size = 'normal' }) {
   const isLarge = size === 'large'
@@ -18,22 +18,10 @@ export default function GameCard({ game, size = 'normal' }) {
         } flex flex-col justify-between`}
         style={{ backgroundColor: game.color }}
       >
-        <div className="flex items-start justify-between relative z-10">
+        <div className="relative z-10">
           <span className={`${isLarge ? 'text-5xl' : 'text-3xl'}`}>
             {game.icon}
           </span>
-          <div className="flex gap-1.5">
-            {game.isNew && (
-              <span className="tag tag-yellow">New</span>
-            )}
-            {game.featured && (
-              <span className={`tag ${isLightBg ? 'bg-navy text-white border-navy' : 'bg-white/90 text-navy border-navy'}`}>
-                <span className="flex items-center gap-0.5">
-                  <Zap className="w-2.5 h-2.5" /> Hot
-                </span>
-              </span>
-            )}
-          </div>
         </div>
 
         <div className="relative z-10">
@@ -47,9 +35,9 @@ export default function GameCard({ game, size = 'normal' }) {
           <p
             className={`${isLightBg ? 'text-navy/70' : 'text-white/80'} ${
               isLarge ? 'text-sm' : 'text-xs'
-            } mb-2 font-medium`}
+            } mb-2 font-medium line-clamp-2`}
           >
-            {game.tagline}
+            {game.description}
           </p>
           <div className="flex items-center gap-3">
             <span className={`flex items-center gap-1 ${isLightBg ? 'text-navy/60' : 'text-white/70'} text-xs font-bold`}>

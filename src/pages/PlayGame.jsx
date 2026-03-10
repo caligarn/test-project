@@ -1,35 +1,28 @@
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, lazy, Suspense } from 'react'
 import { ArrowLeft, Coins } from 'lucide-react'
 import { getGame } from '../lib/gameData'
 import { useAuth } from '../context/AuthContext'
 import { isConfigured } from '../lib/fal'
 import { getCredits } from '../lib/storage'
 import BannerAd from '../components/BannerAd'
-import InfinimapGame from '../games/InfinimapGame'
-import HaikuCanvasGame from '../games/HaikuCanvasGame'
-import MosaicGame from '../games/MosaicGame'
-import CommunityComicGame from '../games/CommunityComicGame'
-import PromptGuesserGame from '../games/PromptGuesserGame'
-import PixelDuelGame from '../games/PixelDuelGame'
-import StyleRouletteGame from '../games/StyleRouletteGame'
-import SpeedPromptGame from '../games/SpeedPromptGame'
-import DreamCaptionGame from '../games/DreamCaptionGame'
-import AIRemixGame from '../games/AIRemixGame'
-import PromptOffGame from '../games/PromptOffGame'
 
 const GAME_COMPONENTS = {
-  'prompt-off': PromptOffGame,
-  'infinimap': InfinimapGame,
-  'haiku-canvas': HaikuCanvasGame,
-  'mosaic-maker': MosaicGame,
-  'community-comic': CommunityComicGame,
-  'prompt-guesser': PromptGuesserGame,
-  'pixel-duel': PixelDuelGame,
-  'style-roulette': StyleRouletteGame,
-  'speed-prompt': SpeedPromptGame,
-  'dream-caption': DreamCaptionGame,
-  'ai-remix': AIRemixGame,
+  'prompt-off': lazy(() => import('../games/PromptOffGame')),
+  'infinimap': lazy(() => import('../games/InfinimapGame')),
+  'haiku-canvas': lazy(() => import('../games/HaikuCanvasGame')),
+  'mosaic-maker': lazy(() => import('../games/MosaicGame')),
+  'community-comic': lazy(() => import('../games/CommunityComicGame')),
+  'prompt-guesser': lazy(() => import('../games/PromptGuesserGame')),
+  'pixel-duel': lazy(() => import('../games/PixelDuelGame')),
+  'style-roulette': lazy(() => import('../games/StyleRouletteGame')),
+  'speed-prompt': lazy(() => import('../games/SpeedPromptGame')),
+  'dream-caption': lazy(() => import('../games/DreamCaptionGame')),
+  'ai-remix': lazy(() => import('../games/AIRemixGame')),
+  'telephone': lazy(() => import('../games/TelephoneGame')),
+  'spot-the-fake': lazy(() => import('../games/SpotTheFakeGame')),
+  'before-after': lazy(() => import('../games/BeforeAfterGame')),
+  'emoji-prompt': lazy(() => import('../games/EmojiPromptGame')),
 }
 
 export default function PlayGame() {
@@ -69,7 +62,6 @@ export default function PlayGame() {
         <div className="flex items-center gap-2">
           <span className="text-xl">{game.icon}</span>
           <span className="font-black text-navy uppercase">{game.title}</span>
-          {game.isNew && <span className="tag tag-yellow text-xs">New</span>}
         </div>
         <div className="flex items-center gap-1 text-xs font-black text-navy/50">
           <Coins className="w-3.5 h-3.5" />
@@ -79,10 +71,18 @@ export default function PlayGame() {
 
       {/* Render live game */}
       {GameComponent ? (
-        <>
+        <Suspense fallback={
+          <div className="flex items-center justify-center min-h-[300px]">
+            <div className="text-center">
+              <div className="animate-spin rounded-full mx-auto mb-3"
+                style={{ width: 32, height: 32, border: '4px solid #1A1A2E22', borderTopColor: '#1A1A2E' }} />
+              <p className="text-navy/50 text-sm font-bold uppercase">Loading game...</p>
+            </div>
+          </div>
+        }>
           <GameComponent game={game} />
           <BannerAd slot="inline" className="mt-6" />
-        </>
+        </Suspense>
       ) : (
         <div className="relative overflow-hidden min-h-[400px] flex items-center justify-center"
           style={{ backgroundColor: game.color, border: '3px solid #1A1A2E' }}>
