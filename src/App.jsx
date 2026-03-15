@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import Header from './components/Header'
 import BottomNav from './components/BottomNav'
+import Footer from './components/Footer'
 import Home from './pages/Home'
 import GameDetail from './pages/GameDetail'
 import Leaderboard from './pages/Leaderboard'
@@ -30,6 +31,7 @@ export default function App() {
             <Route path="/vote/:code" element={<VotePage />} />
           </Routes>
         </main>
+        <Footer />
         <BottomNav />
       </div>
     </AuthProvider>
