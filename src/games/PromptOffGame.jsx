@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import Peer from 'peerjs'
 import { generateFromSketch, connectRealtime, generateImage } from '../lib/fal'
 import { addScore } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/authContext'
 import { Copy, Check, Trash2, Clock, Trophy } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 
@@ -77,10 +77,6 @@ export default function PromptOffGame({ game }) {
   const [audienceCount, setAudienceCount] = useState(0)
   const [votingClosed, setVotingClosed] = useState(false)
 
-  // Legacy voting (kept for peer message compat)
-  const [myVote, setMyVote] = useState(null)
-  const [opponentVote, setOpponentVote] = useState(null)
-
   // Refs
   const peerRef = useRef(null)
   const connRef = useRef(null)
@@ -103,6 +99,81 @@ export default function PromptOffGame({ game }) {
   useEffect(() => { myPromptRef.current = myPromptText }, [myPromptText])
 
   // ---------- PEER MESSAGING ----------
+
+  function resetGame() {
+    setPhase('waiting')
+    setTargetPrompt('')
+    setTimeLeft(GAME_DURATION)
+    setMyPromptText('')
+    setMyLiveUrl(null)
+    setOpponentLiveUrl(null)
+    setMyFinalUrl(null)
+    setMyFinalPrompt('')
+    setOpponentFinalUrl(null)
+    setOpponentFinalPrompt('')
+    setVoteRoomCode('')
+    setAudienceVotes({ A: 0, B: 0 })
+    setAudienceCount(0)
+    setVotingClosed(false)
+    audienceVotesRef.current = { A: 0, B: 0 }
+    if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
+    voteConnectionsRef.current = []
+    scoredRef.current = false
+  }
+
+
+  function loadImageToCanvas(canvas, dataUrl) {
+    if (!canvas) return
+    const img = new Image()
+    img.onload = () => {
+      const ctx = canvas.getContext('2d')
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0)
+    }
+    img.src = dataUrl
+  }
+
+  function initCanvas(canvas) {
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    ctx.fillStyle = '#FFFFFF'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+  }
+
+  function cleanupPeer() {
+    if (timerRef.current) clearInterval(timerRef.current)
+    if (realtimeRef.current) { try { realtimeRef.current.close() } catch { /* already closed */ } realtimeRef.current = null }
+    if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
+    if (connRef.current) { connRef.current.close(); connRef.current = null }
+    if (peerRef.current) { peerRef.current.destroy(); peerRef.current = null }
+    if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
+    voteConnectionsRef.current = []
+    setConnected(false)
+  }
+
+  async function handleTimeUp() {
+    if (realtimeRef.current) { try { realtimeRef.current.close() } catch { /* already closed */ } realtimeRef.current = null }
+    setPhase('generating')
+    const promptText = myPromptRef.current.trim() || 'abstract art'
+    setMyFinalPrompt(promptText)
+    try {
+      const canvas = canvasRef.current
+      const canvasData = canvas ? canvas.toDataURL('image/jpeg', 0.6) : null
+      let url
+      if (canvasData) {
+        url = await generateFromSketch(promptText, canvasData, { strength: 0.6 })
+      } else {
+        url = await generateImage(promptText)
+      }
+      setMyFinalUrl(url)
+      send({ type: 'final', url, prompt: promptText })
+    } catch {
+      const fallback = myLiveUrl || ''
+      setMyFinalUrl(fallback)
+      send({ type: 'final', url: fallback, prompt: promptText })
+    }
+  }
+
 
   const send = useCallback((data) => {
     if (connRef.current?.open) connRef.current.send(data)
@@ -127,9 +198,6 @@ export default function PromptOffGame({ game }) {
         setOpponentFinalUrl(msg.url)
         setOpponentFinalPrompt(msg.prompt)
         break
-      case 'vote':
-        setOpponentVote(msg.vote)
-        break
       case 'vote-room':
         setVoteRoomCode(msg.code)
         break
@@ -144,17 +212,6 @@ export default function PromptOffGame({ game }) {
         break
     }
   }, [])
-
-  function loadImageToCanvas(canvas, dataUrl) {
-    if (!canvas) return
-    const img = new Image()
-    img.onload = () => {
-      const ctx = canvas.getContext('2d')
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      ctx.drawImage(img, 0, 0)
-    }
-    img.src = dataUrl
-  }
 
   const setupConn = useCallback((conn) => {
     connRef.current = conn
@@ -173,17 +230,6 @@ export default function PromptOffGame({ game }) {
     })
     conn.on('error', () => setError('Connection error. Try again.'))
   }, [username, handleMessage])
-
-  function cleanupPeer() {
-    if (timerRef.current) clearInterval(timerRef.current)
-    if (realtimeRef.current) { try { realtimeRef.current.close() } catch {} realtimeRef.current = null }
-    if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
-    if (connRef.current) { connRef.current.close(); connRef.current = null }
-    if (peerRef.current) { peerRef.current.destroy(); peerRef.current = null }
-    if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
-    voteConnectionsRef.current = []
-    setConnected(false)
-  }
 
   useEffect(() => () => cleanupPeer(), [])
 
@@ -257,15 +303,21 @@ export default function PromptOffGame({ game }) {
   useEffect(() => {
     if (phase !== 'playing') return
     setTimeLeft(GAME_DURATION)
-    // Canvas may be inside a collapsed <details>, init when available
+    // The canvas may be inside a collapsed <details>, so it can mount after this
+    // effect runs. Poll until it appears, and only ever paint a given canvas
+    // once — re-initialising would erase whatever the player has drawn.
+    const inited = new WeakSet()
     const initWhenReady = () => {
-      if (canvasRef.current) initCanvas(canvasRef.current)
-      if (opponentCanvasRef.current) initCanvas(opponentCanvasRef.current)
+      for (const ref of [canvasRef, opponentCanvasRef]) {
+        const canvas = ref.current
+        if (canvas && !inited.has(canvas)) {
+          inited.add(canvas)
+          initCanvas(canvas)
+        }
+      }
     }
     initWhenReady()
-    // Also observe for when canvas becomes available (details opened)
-    const observer = new MutationObserver(initWhenReady)
-    observer.observe(document.body, { childList: true, subtree: true })
+    const pollId = setInterval(initWhenReady, 500)
     scoredRef.current = false
 
     // Try to set up real-time connection
@@ -293,19 +345,12 @@ export default function PromptOffGame({ game }) {
     }, 1000)
 
     return () => {
-      observer.disconnect()
+      clearInterval(pollId)
       if (timerRef.current) clearInterval(timerRef.current)
-      if (realtimeRef.current) { try { realtimeRef.current.close() } catch {} realtimeRef.current = null }
+      if (realtimeRef.current) { try { realtimeRef.current.close() } catch { /* already closed */ } realtimeRef.current = null }
       if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
     }
   }, [phase])
-
-  function initCanvas(canvas) {
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    ctx.fillStyle = '#FFFFFF'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-  }
 
   // ---------- REAL-TIME GENERATION ----------
 
@@ -385,33 +430,10 @@ export default function PromptOffGame({ game }) {
 
   // ---------- TIME UP / SUBMIT ----------
 
-  async function handleTimeUp() {
-    if (realtimeRef.current) { try { realtimeRef.current.close() } catch {} realtimeRef.current = null }
-    setPhase('generating')
-    const promptText = myPromptRef.current.trim() || 'abstract art'
-    setMyFinalPrompt(promptText)
-    try {
-      const canvas = canvasRef.current
-      const canvasData = canvas ? canvas.toDataURL('image/jpeg', 0.6) : null
-      let url
-      if (canvasData) {
-        url = await generateFromSketch(promptText, canvasData, { strength: 0.6 })
-      } else {
-        url = await generateImage(promptText)
-      }
-      setMyFinalUrl(url)
-      send({ type: 'final', url, prompt: promptText })
-    } catch {
-      const fallback = myLiveUrl || ''
-      setMyFinalUrl(fallback)
-      send({ type: 'final', url: fallback, prompt: promptText })
-    }
-  }
-
   async function handleSubmitEarly() {
     if (!myPromptText.trim()) return
     if (timerRef.current) clearInterval(timerRef.current)
-    if (realtimeRef.current) { try { realtimeRef.current.close() } catch {} realtimeRef.current = null }
+    if (realtimeRef.current) { try { realtimeRef.current.close() } catch { /* already closed */ } realtimeRef.current = null }
     setPhase('generating')
     const promptText = myPromptText.trim()
     setMyFinalPrompt(promptText)
@@ -590,19 +612,6 @@ export default function PromptOffGame({ game }) {
     triggerRealtimeGeneration()
   }
 
-  // ---------- VOTING ----------
-
-  function castVote(vote) {
-    setMyVote(vote)
-    send({ type: 'vote', vote })
-  }
-
-  function getWinner() {
-    if (!myVote || !opponentVote) return null
-    if (myVote === opponentVote) return myVote
-    return 'tie'
-  }
-
   function copyCode() {
     navigator.clipboard.writeText(roomCode).then(() => {
       setCopied(true)
@@ -610,38 +619,10 @@ export default function PromptOffGame({ game }) {
     })
   }
 
-  function resetGame() {
-    setPhase('waiting')
-    setTargetPrompt('')
-    setTimeLeft(GAME_DURATION)
-    setMyPromptText('')
-    setMyLiveUrl(null)
-    setOpponentLiveUrl(null)
-    setMyFinalUrl(null)
-    setMyFinalPrompt('')
-    setOpponentFinalUrl(null)
-    setOpponentFinalPrompt('')
-    setMyVote(null)
-    setOpponentVote(null)
-    setVoteRoomCode('')
-    setAudienceVotes({ A: 0, B: 0 })
-    setAudienceCount(0)
-    setVotingClosed(false)
-    audienceVotesRef.current = { A: 0, B: 0 }
-    if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
-    voteConnectionsRef.current = []
-    scoredRef.current = false
-  }
-
   function requestRematch() {
     send({ type: 'rematch' })
     resetGame()
   }
-
-  const myRole = isHost ? 'host' : 'guest'
-  const winner = getWinner()
-  const iWon = winner === myRole
-  const theyWon = winner && winner !== 'tie' && winner !== myRole
 
   // Score on audience vote result
   // A = host's image, B = guest's image
@@ -947,10 +928,8 @@ export default function PromptOffGame({ game }) {
   }
 
   // VOTING — audience votes via QR code, players see results live
-  if (phase === 'voting' || phase === 'judging') {
+  if (phase === 'voting') {
     const totalVotes = audienceVotes.A + audienceVotes.B
-    const pctA = totalVotes > 0 ? Math.round((audienceVotes.A / totalVotes) * 100) : 0
-    const pctB = totalVotes > 0 ? Math.round((audienceVotes.B / totalVotes) * 100) : 0
     // A = host, B = guest — map to "my" and "their" perspective
     const hostName = isHost ? username : opponentName
     const guestName = isHost ? opponentName : username
@@ -987,9 +966,7 @@ export default function PromptOffGame({ game }) {
                       style={{ background: '#C8FF00', color: '#1A1A2E' }}>Winner</div>
                   )}
                 </div>
-                <p className="text-xs text-white/50 font-medium text-center">
-                  <span className="text-white font-bold">{myFinalPrompt}</span>
-                </p>
+                <p className="text-xs text-navy/70 font-bold text-center">{myFinalPrompt}</p>
                 {totalVotes > 0 && (
                   <div className="w-full h-8 relative" style={{ border: '2px solid #C8FF00', background: '#1a1a2e' }}>
                     <div className="h-full transition-all duration-700" style={{ width: `${myPct}%`, background: '#C8FF00' }} />
@@ -1015,9 +992,7 @@ export default function PromptOffGame({ game }) {
                       style={{ background: '#FF2D55', color: '#fff' }}>Winner</div>
                   )}
                 </div>
-                <p className="text-xs text-white/50 font-medium text-center">
-                  <span className="text-white font-bold">{opponentFinalPrompt}</span>
-                </p>
+                <p className="text-xs text-navy/70 font-bold text-center">{opponentFinalPrompt}</p>
                 {totalVotes > 0 && (
                   <div className="w-full h-8 relative" style={{ border: '2px solid #FF2D55', background: '#1a1a2e' }}>
                     <div className="h-full transition-all duration-700" style={{ width: `${theirPct}%`, background: '#FF2D55' }} />
@@ -1045,17 +1020,17 @@ export default function PromptOffGame({ game }) {
                     fgColor="#1A1A2E" bgColor="#ffffff" />
                 </div>
                 <div className="flex items-center gap-2">
-                  <code className="text-xs text-white/60 font-mono bg-white/10 px-3 py-1.5"
-                    style={{ border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <code className="text-xs text-navy/70 font-mono bg-navy/5 px-3 py-1.5"
+                    style={{ border: '1px solid rgba(26,26,46,0.15)' }}>
                     {voteUrl}
                   </code>
                   <button onClick={() => { navigator.clipboard.writeText(voteUrl); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
-                    className="p-1.5 hover:bg-white/10 transition-colors" title="Copy link">
-                    {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4 text-white/40" />}
+                    className="p-1.5 hover:bg-navy/5 transition-colors" title="Copy link">
+                    {copied ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4 text-navy/40" />}
                   </button>
                 </div>
 
-                <div className="flex items-center gap-3 text-white/50 text-sm font-bold mt-2">
+                <div className="flex items-center gap-3 text-navy/50 text-sm font-bold mt-2">
                   <span>{audienceCount} viewer{audienceCount !== 1 ? 's' : ''} connected</span>
                   <span>|</span>
                   <span>{totalVotes} vote{totalVotes !== 1 ? 's' : ''} cast</span>
@@ -1070,9 +1045,9 @@ export default function PromptOffGame({ game }) {
                 )}
               </div>
             ) : (
-              <div className="flex items-center justify-center gap-2 text-white/30 text-sm">
+              <div className="flex items-center justify-center gap-2 text-navy/40 text-sm font-medium">
                 <div className="animate-spin rounded-full"
-                  style={{ width: 16, height: 16, border: '2px solid #ffffff33', borderTopColor: '#C8FF00' }} />
+                  style={{ width: 16, height: 16, border: '2px solid #1A1A2E22', borderTopColor: '#1A1A2E' }} />
                 <span>Setting up vote room...</span>
               </div>
             )}
@@ -1083,13 +1058,13 @@ export default function PromptOffGame({ game }) {
             <h3 className="text-3xl font-black text-navy uppercase mb-2">
               {audienceTie ? "It's a Tie!" : iWonAudience ? 'You Win!' : `${opponentName} Wins!`}
             </h3>
-            <p className="text-white/40 text-sm font-medium mb-1">
+            <p className="text-navy/40 text-sm font-medium mb-1">
               {totalVotes} vote{totalVotes !== 1 ? 's' : ''} from the audience
             </p>
-            <p className="text-lg font-bold text-white/60 mb-2">
+            <p className="text-lg font-bold text-navy/60 mb-2">
               {hostName}: {audienceVotes.A} vote{audienceVotes.A !== 1 ? 's' : ''} — {guestName}: {audienceVotes.B} vote{audienceVotes.B !== 1 ? 's' : ''}
             </p>
-            <p className="text-4xl font-black mb-1" style={{ color: iWonAudience ? '#C8FF00' : theyWonAudience ? '#FF2D55' : '#fff' }}>
+            <p className="text-4xl font-black mb-1" style={{ color: iWonAudience ? '#65a30d' : theyWonAudience ? '#FF2D55' : '#1A1A2E' }}>
               +{myPoints} pts
             </p>
             <p className="text-navy/40 text-xs font-medium mb-6">

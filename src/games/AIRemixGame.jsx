@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { addScore } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { addScore, safeGetItem, safeSetItem, createEntryId } from '../lib/storage'
+import { useAuth } from '../context/authContext'
 import { generateImage } from '../lib/fal'
 
 const STARTER_PROMPTS = [
@@ -24,7 +24,7 @@ export default function AIRemixGame({ game }) {
   const [phase, setPhase] = useState('start') // start, remixing, generating, viewing
   const [error, setError] = useState(null)
   const [score, setScore] = useState(0)
-  const [savedChains, setSavedChains] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
+  const [savedChains, setSavedChains] = useState(() => safeGetItem(STORAGE_KEY, []))
   const [generating, setGenerating] = useState(false)
 
   const maxSteps = 6
@@ -70,13 +70,13 @@ export default function AIRemixGame({ game }) {
       if (updated.length >= maxSteps) {
         // Save chain
         const chainEntry = {
-          id: Date.now(),
+          id: createEntryId(),
           steps: updated,
           author: username,
         }
         const updatedChains = [chainEntry, ...savedChains].slice(0, 20)
         setSavedChains(updatedChains)
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedChains))
+        safeSetItem(STORAGE_KEY, updatedChains)
         setPhase('viewing')
       } else {
         setPhase('remixing')

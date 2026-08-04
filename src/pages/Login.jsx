@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/authContext'
 import { getAvatars } from '../lib/storage'
 import { Gamepad2 } from 'lucide-react'
 

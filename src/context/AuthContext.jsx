@@ -1,30 +1,25 @@
-import { createContext, useContext, useState, useEffect } from 'react'
+import { useState } from 'react'
 import {
   getCurrentUser,
   loginUser,
   createUser,
   logoutUser,
   isSubscribed,
-  getUsers,
-  updateUser,
 } from '../lib/storage'
-
-const AuthContext = createContext(null)
+import { AuthContext } from './authContext'
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null)
-  const [subscribed, setSubscribed] = useState(false)
-
-  useEffect(() => {
-    const u = getCurrentUser()
-    if (u) setUser(u)
-    setSubscribed(isSubscribed())
-  }, [])
+  // localStorage is synchronous, so seed from it on the very first render.
+  // Hydrating in an effect instead meant every consumer saw a signed-out user
+  // on mount, which is how game state ended up saved under "guest".
+  const [user, setUser] = useState(() => getCurrentUser())
+  const [subscribed, setSubscribed] = useState(() => Boolean(isSubscribed()))
 
   function login(username, password) {
     const result = loginUser(username, password)
     if (result.success) {
       setUser(result.user)
+      setSubscribed(Boolean(isSubscribed()))
     }
     return result
   }
@@ -55,10 +50,4 @@ export function AuthProvider({ children }) {
       {children}
     </AuthContext.Provider>
   )
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider')
-  return ctx
 }

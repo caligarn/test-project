@@ -1,9 +1,12 @@
 import { fal } from '@fal-ai/client'
 
-const DEFAULT_KEY = '96d135df-dcc0-4449-bf1a-c27a64f3d39a:03687b0b7f91482a8765ac9e72e809f3'
+// Sourced from the build environment (VITE_FAL_KEY) so the credential is not
+// committed to the repo. Note that any key shipped to a browser build is still
+// readable by end users — a server-side proxy is the only real fix.
+const DEFAULT_KEY = import.meta.env.VITE_FAL_KEY || ''
 let configured = false
 
-export function configureFal(apiKey) {
+export function configureFal(apiKey, { persist = true } = {}) {
   if (apiKey) {
     fal.config({
       credentials: apiKey,
@@ -13,7 +16,9 @@ export function configureFal(apiKey) {
       },
     })
     configured = true
-    localStorage.setItem('fal_api_key', apiKey)
+    // Only user-supplied keys are persisted. Persisting the build-time key
+    // would pin clients to it and defeat rotation via the environment.
+    if (persist) localStorage.setItem('fal_api_key', apiKey)
   }
 }
 
@@ -21,12 +26,13 @@ export function isConfigured() {
   if (!configured) {
     const saved = localStorage.getItem('fal_api_key')
     if (saved) {
-      configureFal(saved)
+      configureFal(saved, { persist: false })
       return true
     }
-    // Use default key
-    configureFal(DEFAULT_KEY)
-    return true
+    if (DEFAULT_KEY) {
+      configureFal(DEFAULT_KEY, { persist: false })
+      return true
+    }
   }
   return configured
 }
@@ -50,6 +56,7 @@ async function withRetry(fn, retries = 5, baseDelay = 800) {
       }
     }
   }
+  throw new Error('Generation failed after retries')
 }
 
 export async function generateImage(prompt, options = {}) {

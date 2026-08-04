@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Key, Bell, Volume2, Palette, Trash2 } from 'lucide-react'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/authContext'
 import { isConfigured, configureFal } from '../lib/fal'
 import { getAvatars, updateUser } from '../lib/storage'
 

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Trophy, Medal, TrendingUp } from 'lucide-react'
 import { getLeaderboard } from '../lib/storage'
-import { GAMES } from '../lib/gameData'
+import { ALL_GAMES } from '../lib/gameData'
 import BannerAd from '../components/BannerAd'
 
 export default function Leaderboard() {
@@ -14,10 +14,8 @@ export default function Leaderboard() {
     selectedGame === 'all' ? null : selectedGame
   )
 
-  const displayData =
-    leaderboard.length > 0
-      ? leaderboard
-      : getDemoLeaderboard(selectedGame)
+  const usingDemoData = leaderboard.length === 0
+  const displayData = usingDemoData ? getDemoLeaderboard() : leaderboard
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
@@ -29,6 +27,11 @@ export default function Leaderboard() {
         <p className="text-navy/50 text-sm mt-1 font-medium">
           Top players across all Gen Arcade games
         </p>
+        {usingDemoData && (
+          <p className="text-navy/40 text-xs mt-2 font-bold uppercase">
+            Sample standings — play a round to put real scores here
+          </p>
+        )}
       </div>
 
       {/* Game Filter */}
@@ -43,7 +46,7 @@ export default function Leaderboard() {
         >
           Overall
         </button>
-        {GAMES.map((game) => (
+        {ALL_GAMES.map((game) => (
           <button
             key={game.id}
             onClick={() => setSelectedGame(game.id)}
@@ -170,8 +173,8 @@ export default function Leaderboard() {
   )
 }
 
-function getDemoLeaderboard(gameId) {
-  const names = [
+function getDemoLeaderboard() {
+  return [
     { username: 'PixelMaster', avatar: '🤖', score: 12450, gamesPlayed: 42 },
     { username: 'AIWizard', avatar: '🧠', score: 11200, gamesPlayed: 38 },
     { username: 'PromptQueen', avatar: '👾', score: 9800, gamesPlayed: 35 },
@@ -183,5 +186,4 @@ function getDemoLeaderboard(gameId) {
     { username: 'RemixRider', avatar: '🔄', score: 3100, gamesPlayed: 11 },
     { username: 'ArtExplorer', avatar: '🌟', score: 1800, gamesPlayed: 7 },
   ]
-  return names
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { addScore } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { addScore, safeGetItem, safeSetItem, createEntryId } from '../lib/storage'
+import { useAuth } from '../context/authContext'
 import { generateImage } from '../lib/fal'
 
 const STORAGE_KEY = 'ai_arcade_mosaic'
@@ -9,7 +9,7 @@ const ACCENT_COLORS = ['#FF2D55','#C8FF00','#FF6B35','#FFD600','#8B5CF6','#00D4F
 export default function MosaicGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
-  const [pieces, setPieces] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
+  const [pieces, setPieces] = useState(() => safeGetItem(STORAGE_KEY, []))
   const [prompt, setPrompt] = useState('')
   const [accent, setAccent] = useState(ACCENT_COLORS[0])
   const [generating, setGenerating] = useState(false)
@@ -28,17 +28,18 @@ export default function MosaicGame({ game }) {
         `${prompt.trim()}, mosaic tile art, colorful geometric abstract, vibrant`,
         { width: 512, height: 512 }
       )
-      const piece = { id: Date.now(), url, prompt: prompt.trim(), accent, author: username }
+      const piece = { id: createEntryId(), url, prompt: prompt.trim(), accent, author: username }
       const updated = [...pieces, piece].slice(-60)
       setPieces(updated)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+      safeSetItem(STORAGE_KEY, updated)
       const pts = game.pointsPerAction || 60
       setScore(s => s + pts)
       addScore(game.id, username, pts, { prompt })
       setPrompt('')
       setShowForm(false)
     } catch (err) {
-      setError('Generation failed — check your Fal.ai key.')
+      console.error(err)
+      setError('Image generation failed. Check your connection or API key, then try again.')
     } finally {
       setGenerating(false)
     }

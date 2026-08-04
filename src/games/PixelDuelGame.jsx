@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { addScore } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/authContext'
 import { generateImage } from '../lib/fal'
 
 const CHALLENGES = [
@@ -21,18 +21,23 @@ const CHALLENGES = [
   'A retro diner with chrome finishes and neon signs at dusk',
 ]
 
+// Short words match almost anything as a substring, so they only count on an
+// exact hit — otherwise padding a prompt with filler inflates the score.
+const MIN_FUZZY_LEN = 4
+
 function promptSimilarity(playerPrompt, targetPrompt) {
   const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean)
   const playerWords = new Set(normalize(playerPrompt))
-  const targetWords = normalize(targetPrompt)
+  const targetWords = [...new Set(normalize(targetPrompt))]
   const targetSet = new Set(targetWords)
+  if (targetWords.length === 0) return 0
 
   let semanticScore = 0
   for (const w of playerWords) {
     if (targetSet.has(w)) semanticScore += 2
-    else {
+    else if (w.length >= MIN_FUZZY_LEN) {
       for (const tw of targetWords) {
-        if (tw.includes(w) || w.includes(tw)) { semanticScore += 1; break }
+        if (tw.length >= MIN_FUZZY_LEN && (tw.includes(w) || w.includes(tw))) { semanticScore += 1; break }
       }
     }
   }
