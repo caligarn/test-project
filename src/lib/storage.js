@@ -2,10 +2,49 @@ const USERS_KEY = 'ai_arcade_users'
 const CURRENT_USER_KEY = 'ai_arcade_current_user'
 const SCORES_KEY = 'ai_arcade_scores'
 const SUBSCRIPTION_KEY = 'ai_arcade_subscription'
+const MAX_SCORES = 500
+
+/**
+ * Write JSON to localStorage without throwing. Quota is easy to hit because
+ * the games persist galleries of image URLs, and an unhandled QuotaExceeded
+ * error inside a game's submit handler surfaces as a bogus "check your API
+ * key" message.
+ */
+export function safeSetItem(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+    return true
+  } catch (err) {
+    console.warn(`Could not persist "${key}" — storage may be full.`, err)
+    return false
+  }
+}
+
+let entryCounter = 0
+
+/**
+ * Unique id for a gallery entry. Date.now() on its own collides when two
+ * entries are created within the same millisecond, which duplicates React keys
+ * and makes per-entry actions (voting, zooming) hit the wrong item.
+ */
+export function createEntryId() {
+  entryCounter += 1
+  return `${Date.now()}-${entryCounter}`
+}
+
+/** Read and parse JSON from localStorage, falling back on corrupt data. */
+export function safeGetItem(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw === null ? fallback : JSON.parse(raw)
+  } catch {
+    return fallback
+  }
+}
 
 // User management
 export function getUsers() {
-  return JSON.parse(localStorage.getItem(USERS_KEY) || '{}')
+  return safeGetItem(USERS_KEY, {})
 }
 
 export function createUser(username, password, avatar) {
@@ -22,7 +61,7 @@ export function createUser(username, password, avatar) {
     streak: 0,
     achievements: [],
   }
-  localStorage.setItem(USERS_KEY, JSON.stringify(users))
+  safeSetItem(USERS_KEY, users)
   return { success: true, user: users[username] }
 }
 
@@ -51,13 +90,14 @@ export function updateUser(username, updates) {
   const users = getUsers()
   if (!users[username]) return
   users[username] = { ...users[username], ...updates }
-  localStorage.setItem(USERS_KEY, JSON.stringify(users))
+  safeSetItem(USERS_KEY, users)
   return users[username]
 }
 
 // Score management
 export function getScores() {
-  return JSON.parse(localStorage.getItem(SCORES_KEY) || '[]')
+  const scores = safeGetItem(SCORES_KEY, [])
+  return Array.isArray(scores) ? scores : []
 }
 
 export function addScore(gameId, username, score, details = {}) {
@@ -69,10 +109,12 @@ export function addScore(gameId, username, score, details = {}) {
     details,
     timestamp: Date.now(),
   })
-  localStorage.setItem(SCORES_KEY, JSON.stringify(scores))
+  // Bound the history — it grows on every play and is only read in aggregate.
+  safeSetItem(SCORES_KEY, scores.slice(-MAX_SCORES))
 
-  // Update user stats
-  const user = getCurrentUser()
+  // Update stats on the scoring user, not whoever is currently signed in.
+  const users = getUsers()
+  const user = users[username]
   if (user) {
     updateUser(username, {
       gamesPlayed: (user.gamesPlayed || 0) + 1,
@@ -91,7 +133,7 @@ export function getLeaderboard(gameId = null, limit = 50) {
   // Aggregate by user - best score per game
   const userBests = {}
   filtered.forEach((s) => {
-    const key = gameId ? s.username : `${s.username}`
+    const key = s.username
     if (!userBests[key] || s.score > userBests[key].score) {
       userBests[key] = s
     }
@@ -127,18 +169,15 @@ export function getLeaderboard(gameId = null, limit = 50) {
 
 // Subscription
 export function getSubscription() {
-  return JSON.parse(localStorage.getItem(SUBSCRIPTION_KEY) || 'null')
+  return safeGetItem(SUBSCRIPTION_KEY, null)
 }
 
 export function setSubscription(plan) {
-  localStorage.setItem(
-    SUBSCRIPTION_KEY,
-    JSON.stringify({
-      plan,
-      startedAt: Date.now(),
-      active: true,
-    })
-  )
+  safeSetItem(SUBSCRIPTION_KEY, {
+    plan,
+    startedAt: Date.now(),
+    active: true,
+  })
 }
 
 export function isSubscribed() {
@@ -152,34 +191,34 @@ const FREE_DAILY_CREDITS = 3
 const LAST_FREE_CREDITS_KEY = 'ai_arcade_last_free_credits'
 
 export function getCredits(username) {
-  const credits = JSON.parse(localStorage.getItem(CREDITS_KEY) || '{}')
+  const credits = safeGetItem(CREDITS_KEY, {})
   if (!credits[username]) credits[username] = 0
 
   // Award free daily credits
-  const lastFree = JSON.parse(localStorage.getItem(LAST_FREE_CREDITS_KEY) || '{}')
+  const lastFree = safeGetItem(LAST_FREE_CREDITS_KEY, {})
   const today = new Date().toDateString()
   if (lastFree[username] !== today) {
     credits[username] += FREE_DAILY_CREDITS
     lastFree[username] = today
-    localStorage.setItem(CREDITS_KEY, JSON.stringify(credits))
-    localStorage.setItem(LAST_FREE_CREDITS_KEY, JSON.stringify(lastFree))
+    safeSetItem(CREDITS_KEY, credits)
+    safeSetItem(LAST_FREE_CREDITS_KEY, lastFree)
   }
 
   return credits[username]
 }
 
 export function useCredit(username) {
-  const credits = JSON.parse(localStorage.getItem(CREDITS_KEY) || '{}')
+  const credits = safeGetItem(CREDITS_KEY, {})
   if (!credits[username] || credits[username] <= 0) return false
   credits[username] -= 1
-  localStorage.setItem(CREDITS_KEY, JSON.stringify(credits))
+  safeSetItem(CREDITS_KEY, credits)
   return true
 }
 
 export function addCredits(username, amount) {
-  const credits = JSON.parse(localStorage.getItem(CREDITS_KEY) || '{}')
+  const credits = safeGetItem(CREDITS_KEY, {})
   credits[username] = (credits[username] || 0) + amount
-  localStorage.setItem(CREDITS_KEY, JSON.stringify(credits))
+  safeSetItem(CREDITS_KEY, credits)
   return credits[username]
 }
 

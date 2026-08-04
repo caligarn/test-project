@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { addScore } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/authContext'
 import { generateImage } from '../lib/fal'
 
 const EMOJI_CATEGORIES = [

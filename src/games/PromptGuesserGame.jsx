@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { addScore } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/authContext'
 import { generateImage } from '../lib/fal'
 
 const PROMPTS = [
@@ -26,19 +26,24 @@ const PROMPTS = [
   'A hummingbird made of stained glass in a cathedral',
 ]
 
+// Words too short to carry meaning match almost anything as a substring, so
+// they are excluded from fuzzy matching to stop "a a a a" scoring highly.
+const MIN_FUZZY_LEN = 4
+
 function scoreSimilarity(guess, original) {
   const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean)
-  const guessWords = normalize(guess)
-  const origWords = normalize(original)
-  if (guessWords.length === 0) return 0
+  // Dedupe both sides: repeating a correct word must not inflate the score.
+  const guessWords = [...new Set(normalize(guess))]
+  const origWords = [...new Set(normalize(original))]
+  if (guessWords.length === 0 || origWords.length === 0) return 0
 
   const origSet = new Set(origWords)
   let matches = 0
   for (const w of guessWords) {
     if (origSet.has(w)) matches++
-    else {
+    else if (w.length >= MIN_FUZZY_LEN) {
       for (const ow of origWords) {
-        if (ow.includes(w) || w.includes(ow)) { matches += 0.5; break }
+        if (ow.length >= MIN_FUZZY_LEN && (ow.includes(w) || w.includes(ow))) { matches += 0.5; break }
       }
     }
   }
@@ -46,7 +51,7 @@ function scoreSimilarity(guess, original) {
   const precision = matches / guessWords.length
   const recall = matches / origWords.length
   const f1 = precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0
-  return Math.round(f1 * 100)
+  return Math.min(100, Math.round(f1 * 100))
 }
 
 export default function PromptGuesserGame({ game }) {
@@ -86,7 +91,7 @@ export default function PromptGuesserGame({ game }) {
       const url = await generateImage(prompt)
       setImageUrl(url)
     } catch {
-      setError('Image generation failed — check your API key.')
+      setError('Image generation failed. Check your connection or API key, then try again.')
     } finally {
       setGenerating(false)
     }

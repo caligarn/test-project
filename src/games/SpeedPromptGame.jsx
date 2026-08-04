@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { addScore } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/authContext'
 import { generateImage } from '../lib/fal'
 
 const CONCEPTS = [
@@ -36,6 +36,7 @@ export default function SpeedPromptGame({ game }) {
   const [usedConcepts, setUsedConcepts] = useState([])
   const timerRef = useRef(null)
   const inputRef = useRef(null)
+  const submitRef = useRef(null)
 
   const maxRounds = 5
   const timeLimit = 30
@@ -60,25 +61,20 @@ export default function SpeedPromptGame({ game }) {
     setError(null)
     setPhase('writing')
 
+    // Wall-clock countdown, so a backgrounded tab (where timers are throttled)
+    // can't hand the player extra seconds — or extra time-bonus points.
+    const deadline = Date.now() + timeLimit * 1000
     timerRef.current = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(timerRef.current)
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
+      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+      setTimeLeft(remaining)
+      if (remaining === 0) {
+        clearInterval(timerRef.current)
+        submitRef.current?.()
+      }
+    }, 250)
 
     setTimeout(() => inputRef.current?.focus(), 100)
   }
-
-  // Auto-submit when timer hits 0
-  useEffect(() => {
-    if (timeLeft === 0 && phase === 'writing') {
-      handleSubmit()
-    }
-  }, [timeLeft, phase])
 
   const handleSubmit = async () => {
     if (phase !== 'writing') return
@@ -108,11 +104,15 @@ export default function SpeedPromptGame({ game }) {
       setTotalScore(s => s + pts)
       addScore(game.id, username, pts, { prompt: finalPrompt, concept: concept.concept, timeLeft })
     } catch {
-      setError('Generation failed — check your API key.')
+      setError('Image generation failed. Check your connection or API key, then try again.')
       setRoundScore(0)
     }
     setPhase('result')
   }
+
+  // The timer callback is registered once per round, so it reaches the current
+  // handleSubmit through a ref rather than a stale closure.
+  useEffect(() => { submitRef.current = handleSubmit })
 
   const nextRound = () => {
     if (round >= maxRounds) {
@@ -126,6 +126,10 @@ export default function SpeedPromptGame({ game }) {
   const restart = () => {
     setRound(1)
     setTotalScore(0)
+    setRoundScore(0)
+    setImageUrl(null)
+    setPrompt('')
+    setError(null)
     setUsedConcepts([])
     setPhase('idle')
   }

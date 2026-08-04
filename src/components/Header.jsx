@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/authContext'
 import { Gamepad2, Crown, LogIn } from 'lucide-react'
 
 export default function Header() {

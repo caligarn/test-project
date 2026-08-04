@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { addScore } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { addScore, safeGetItem, safeSetItem, createEntryId } from '../lib/storage'
+import { useAuth } from '../context/authContext'
 import { generateImage } from '../lib/fal'
 import { BookOpen, Plus, ChevronLeft, ChevronRight, X } from 'lucide-react'
 
@@ -10,7 +10,7 @@ const PANELS_PER_PAGE = 6
 export default function CommunityComicGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
-  const [panels, setPanels] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
+  const [panels, setPanels] = useState(() => safeGetItem(STORAGE_KEY, []))
   const [page, setPage] = useState(0)
   const [showForm, setShowForm] = useState(false)
   const [text, setText] = useState('')
@@ -38,7 +38,7 @@ export default function CommunityComicGame({ game }) {
         { width: 512, height: 384 }
       )
       const panel = {
-        id: Date.now(),
+        id: createEntryId(),
         url,
         text: text.trim(),
         author: username,
@@ -46,16 +46,18 @@ export default function CommunityComicGame({ game }) {
       }
       const updated = [...panels, panel]
       setPanels(updated)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+      safeSetItem(STORAGE_KEY, updated)
       const pts = game.pointsPerAction || 80
       setScore(s => s + pts)
       addScore(game.id, username, pts, { text })
       setText('')
       setShowForm(false)
-      // Jump to last page
-      setPage(Math.floor(updated.length / PANELS_PER_PAGE))
+      // Jump to the page holding the new panel. Using length (not length - 1)
+      // overshoots to a blank page whenever the count lands on a page boundary.
+      setPage(Math.floor((updated.length - 1) / PANELS_PER_PAGE))
     } catch (err) {
-      setError('Generation failed — check your Fal.ai key.')
+      console.error(err)
+      setError('Image generation failed. Check your connection or API key, then try again.')
     } finally {
       setGenerating(false)
     }

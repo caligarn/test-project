@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { addScore } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/authContext'
 import { generateImage } from '../lib/fal'
 
 const STYLES = [
@@ -50,10 +50,16 @@ export default function StyleRouletteGame({ game }) {
   const [phase, setPhase] = useState('idle') // idle, loading, playing, result, gameover
   const [error, setError] = useState(null)
   const [timeLeft, setTimeLeft] = useState(null)
-  const [timerId, setTimerId] = useState(null)
+  const [roundPts, setRoundPts] = useState(0)
+  const timerRef = useRef(null)
 
   const maxRounds = 8
   const baseTime = 15
+
+  // Stop the countdown if the player navigates away mid-round.
+  useEffect(() => {
+    return () => { if (timerRef.current) clearInterval(timerRef.current) }
+  }, [])
 
   const startRound = async () => {
     setPhase('loading')
@@ -73,18 +79,20 @@ export default function StyleRouletteGame({ game }) {
       setImageUrl(url)
       setPhase('playing')
       // Start timer
-      const deadline = baseTime
-      setTimeLeft(deadline)
-      const id = setInterval(() => {
-        setTimeLeft(prev => {
-          if (prev <= 1) {
-            clearInterval(id)
-            return 0
-          }
-          return prev - 1
-        })
-      }, 1000)
-      setTimerId(id)
+      // Drive the countdown off wall-clock time so a backgrounded tab (where
+      // timers are throttled) can't hand the player extra seconds.
+      const deadline = Date.now() + baseTime * 1000
+      setTimeLeft(baseTime)
+      timerRef.current = setInterval(() => {
+        const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+        setTimeLeft(remaining)
+        if (remaining === 0) {
+          clearInterval(timerRef.current)
+          setSelected('timeout')
+          setStreak(0)
+          setPhase('result')
+        }
+      }, 250)
     } catch {
       setError('Image generation failed.')
       setPhase('idle')
@@ -93,24 +101,18 @@ export default function StyleRouletteGame({ game }) {
 
   const handleSelect = (style) => {
     if (selected || phase !== 'playing') return
-    if (timerId) clearInterval(timerId)
+    if (timerRef.current) clearInterval(timerRef.current)
     setSelected(style.id)
     const isCorrect = style.id === correctStyle.id
     const timeBonus = Math.max(0, (timeLeft || 0) * 2)
     const streakBonus = streak * 5
     const pts = isCorrect ? 100 + timeBonus + streakBonus : 0
     setStreak(isCorrect ? streak + 1 : 0)
+    setRoundPts(pts)
     setTotalScore(s => s + pts)
     if (isCorrect) {
       addScore(game.id, username, pts, { style: correctStyle.id, round, timeLeft })
     }
-    setPhase('result')
-  }
-
-  // Handle time running out
-  if (timeLeft === 0 && phase === 'playing') {
-    setSelected('timeout')
-    setStreak(0)
     setPhase('result')
   }
 
@@ -127,6 +129,10 @@ export default function StyleRouletteGame({ game }) {
     setRound(1)
     setTotalScore(0)
     setStreak(0)
+    setRoundPts(0)
+    setSelected(null)
+    setImageUrl(null)
+    setTimeLeft(null)
     setPhase('idle')
   }
 
@@ -216,7 +222,7 @@ export default function StyleRouletteGame({ game }) {
             {phase === 'result' && (
               <div className="text-center mt-2">
                 {selected === correctStyle.id ? (
-                  <p className="text-lg font-black text-green-600">Correct! +{100 + Math.max(0, (timeLeft || 0) * 2) + (streak > 0 ? (streak - 1) * 5 : 0)} pts</p>
+                  <p className="text-lg font-black text-green-600">Correct! +{roundPts} pts</p>
                 ) : (
                   <p className="text-lg font-black text-red-500">{selected === 'timeout' ? 'Time\'s up!' : 'Wrong!'} The style was {correctStyle.label}</p>
                 )}

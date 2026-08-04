@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { addScore } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/authContext'
 import { generateImage } from '../lib/fal'
 
 const STARTING_PROMPTS = [
@@ -32,7 +32,11 @@ export default function TelephoneGame({ game }) {
   const [error, setError] = useState(null)
   const [score, setScore] = useState(0)
 
-  const currentRound = Math.floor(chain.length / 2) // each round = prompt + image
+  // A round is one description the player writes. chain holds prompt/image
+  // pairs, and the opening prompt is the AI's, not the player's — so the
+  // number of descriptions written so far is (chain.length - 2) / 2.
+  const roundsDone = Math.max(0, Math.floor((chain.length - 1) / 2))
+  const currentRound = Math.min(roundsDone + 1, TOTAL_ROUNDS)
 
   const startGame = async () => {
     const prompt = STARTING_PROMPTS[Math.floor(Math.random() * STARTING_PROMPTS.length)]
@@ -57,14 +61,17 @@ export default function TelephoneGame({ game }) {
     setChain(newChain)
     setGuess('')
 
-    const roundNum = Math.floor(newChain.length / 2)
+    const roundNum = Math.floor((newChain.length - 1) / 2)
     if (roundNum >= TOTAL_ROUNDS) {
       // Game done — score based on similarity between first and last prompt
-      const original = chain[0].value.toLowerCase()
-      const final = guess.trim().toLowerCase()
-      const origWords = new Set(original.split(/\s+/))
-      const finalWords = final.split(/\s+/)
-      const overlap = finalWords.filter(w => origWords.has(w)).length
+      const normalize = (s) => new Set(
+        s.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean)
+      )
+      const origWords = normalize(chain[0].value)
+      const finalWords = normalize(guess)
+      // Both sides are deduped, so overlap can never exceed the original's
+      // word count and similarity stays within 0–100.
+      const overlap = [...finalWords].filter(w => origWords.has(w)).length
       const similarity = Math.round((overlap / Math.max(origWords.size, 1)) * 100)
       const pts = Math.max(20, similarity * 2)
       setScore(pts)
@@ -135,7 +142,7 @@ export default function TelephoneGame({ game }) {
       <div className="flex items-center justify-between brutalist-card p-4">
         <div>
           <p className="text-xs font-black text-navy/50 uppercase">Round</p>
-          <p className="text-3xl font-black text-navy">{Math.min(currentRound + 1, TOTAL_ROUNDS)}/{TOTAL_ROUNDS}</p>
+          <p className="text-3xl font-black text-navy">{currentRound}/{TOTAL_ROUNDS}</p>
         </div>
         <div className="text-right">
           <p className="text-xs font-black text-navy/50 uppercase">Chain Length</p>
@@ -164,7 +171,7 @@ export default function TelephoneGame({ game }) {
         <div className="brutalist-card p-12 text-center">
           <div className="animate-spin rounded-full mx-auto mb-4" style={{ width: 40, height: 40, border: '4px solid #D946EF', borderTopColor: 'transparent' }} />
           <p className="font-black text-navy uppercase">Generating image...</p>
-          <p className="text-navy/40 text-xs font-medium mt-2">Round {currentRound + 1} of {TOTAL_ROUNDS}</p>
+          <p className="text-navy/40 text-xs font-medium mt-2">Round {currentRound} of {TOTAL_ROUNDS}</p>
         </div>
       )}
 
@@ -191,7 +198,7 @@ export default function TelephoneGame({ game }) {
             <button onClick={submitGuess} disabled={!guess.trim()}
               className="w-full py-3 bg-[#D946EF] text-white text-sm font-black uppercase disabled:opacity-40"
               style={{ border: '2px solid #1A1A2E' }}>
-              {currentRound + 1 >= TOTAL_ROUNDS ? 'Finish Chain' : `Next Round (${currentRound + 1}/${TOTAL_ROUNDS})`}
+              {currentRound >= TOTAL_ROUNDS ? 'Finish Chain' : `Next Round (${currentRound}/${TOTAL_ROUNDS})`}
             </button>
           </div>
         </div>

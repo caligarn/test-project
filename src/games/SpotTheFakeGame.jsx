@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { addScore } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/authContext'
 import { generateImage } from '../lib/fal'
 
 const PROMPTS = [
@@ -60,7 +60,7 @@ export default function SpotTheFakeGame({ game }) {
   const [phase, setPhase] = useState('idle') // idle, loading, playing, result, gameover
   const [images, setImages] = useState([]) // { url, isFake }
   const [selected, setSelected] = useState(null)
-  const [fakeIndex, setFakeIndex] = useState(null)
+  const [roundPts, setRoundPts] = useState(0)
   const [error, setError] = useState(null)
   const [timeLeft, setTimeLeft] = useState(null)
   const timerRef = useRef(null)
@@ -103,36 +103,29 @@ export default function SpotTheFakeGame({ game }) {
         { url: results[2], isFake: false },
         { url: results[3], isFake: true },
       ]
-      const shuffled = shuffle(items)
-      setImages(shuffled)
-      setFakeIndex(shuffled.findIndex(img => img.isFake))
+      setImages(shuffle(items))
       setPhase('playing')
 
-      // Start timer
+      // Countdown driven by wall-clock time, so a backgrounded tab (where
+      // timers are throttled) can't hand the player extra seconds.
+      const deadline = Date.now() + TIME_PER_ROUND * 1000
       setTimeLeft(TIME_PER_ROUND)
       timerRef.current = setInterval(() => {
-        setTimeLeft(prev => {
-          if (prev <= 1) {
-            clearInterval(timerRef.current)
-            return 0
-          }
-          return prev - 1
-        })
-      }, 1000)
+        const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+        setTimeLeft(remaining)
+        if (remaining === 0) {
+          clearInterval(timerRef.current)
+          setSelected(-1) // timeout
+          setStreak(0)
+          setRoundPts(0)
+          setPhase('result')
+        }
+      }, 250)
     } catch {
       setError('Image generation failed.')
       setPhase('idle')
     }
   }
-
-  // Handle timeout
-  useEffect(() => {
-    if (timeLeft === 0 && phase === 'playing') {
-      setSelected(-1) // timeout
-      setStreak(0)
-      setPhase('result')
-    }
-  }, [timeLeft, phase])
 
   const handleSelect = (index) => {
     if (selected !== null || phase !== 'playing') return
@@ -144,6 +137,7 @@ export default function SpotTheFakeGame({ game }) {
     const streakBonus = streak * 10
     const pts = isCorrect ? 100 + timeBonus + streakBonus : 0
     setStreak(isCorrect ? streak + 1 : 0)
+    setRoundPts(pts)
     setTotalScore(s => s + pts)
     if (isCorrect) {
       addScore(game.id, username, pts, { round, timeLeft })
@@ -164,6 +158,10 @@ export default function SpotTheFakeGame({ game }) {
     setRound(1)
     setTotalScore(0)
     setStreak(0)
+    setRoundPts(0)
+    setSelected(null)
+    setImages([])
+    setTimeLeft(null)
     setUsedPrompts([])
     setUsedFakes([])
     setPhase('idle')
@@ -274,7 +272,7 @@ export default function SpotTheFakeGame({ game }) {
             <div className="text-center mt-4">
               {selected !== -1 && images[selected]?.isFake ? (
                 <p className="text-lg font-black text-green-600 mb-3">
-                  Correct! +{100 + Math.max(0, (timeLeft || 0) * 3) + (streak > 0 ? (streak - 1) * 10 : 0)} pts
+                  Correct! +{roundPts} pts
                 </p>
               ) : (
                 <p className="text-lg font-black text-red-500 mb-3">

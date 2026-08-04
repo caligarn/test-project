@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { X, Crown } from 'lucide-react'
 import { useState } from 'react'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/authContext'
 
 export default function AdBanner() {
   const [dismissed, setDismissed] = useState(false)

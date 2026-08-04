@@ -10,12 +10,10 @@ import {
 } from 'lucide-react'
 import { getGame } from '../lib/gameData'
 import { getLeaderboard } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
 
 export default function GameDetail() {
   const { gameId } = useParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
   const game = getGame(gameId)
   const leaderboard = getLeaderboard(gameId, 5)
 

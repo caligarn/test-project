@@ -14,6 +14,10 @@ export default function VotePage() {
   const [results, setResults] = useState(null)
   const connRef = useRef(null)
   const peerRef = useRef(null)
+  const timeoutRef = useRef(null)
+  // Peer callbacks are registered once and would otherwise close over the
+  // first render's `myVote`, which is always null.
+  const myVoteRef = useRef(null)
 
   useEffect(() => {
     if (!code) return
@@ -41,7 +45,7 @@ export default function VotePage() {
             break
           case 'vote-results':
             setResults(msg.results)
-            if (myVote) setStatus('results')
+            if (myVoteRef.current) setStatus('results')
             break
           default:
             break
@@ -49,12 +53,13 @@ export default function VotePage() {
       })
 
       conn.on('close', () => {
-        if (status === 'connecting') setStatus('error')
+        // Only a close *before* the room data arrived is a failure to join.
+        setStatus(prev => (prev === 'connecting' ? 'error' : prev))
       })
 
       conn.on('error', () => setStatus('error'))
 
-      setTimeout(() => {
+      timeoutRef.current = setTimeout(() => {
         if (!connRef.current?.open) {
           setStatus('error')
         }
@@ -64,18 +69,15 @@ export default function VotePage() {
     peer.on('error', () => setStatus('error'))
 
     return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
       if (connRef.current) connRef.current.close()
       if (peerRef.current) peerRef.current.destroy()
     }
   }, [code])
 
-  // When results arrive after we already voted, show them
-  useEffect(() => {
-    if (myVote && results) setStatus('results')
-  }, [myVote, results])
-
   function vote(choice) {
     setMyVote(choice)
+    myVoteRef.current = choice
     if (connRef.current?.open) {
       connRef.current.send({ type: 'vote', vote: choice })
     }
@@ -88,9 +90,9 @@ export default function VotePage() {
       <div className="flex items-center justify-center px-4" style={{ minHeight: '60vh' }}>
         <div className="text-center">
           <div className="animate-spin rounded-full mx-auto mb-4"
-            style={{ width: 48, height: 48, border: '4px solid #ffffff33', borderTopColor: '#C8FF00' }} />
-          <h2 className="text-xl font-black text-white uppercase mb-2">Joining Vote Room</h2>
-          <p className="text-white/40 text-sm font-medium">Connecting to {code}...</p>
+            style={{ width: 48, height: 48, border: '4px solid #1A1A2E22', borderTopColor: '#1A1A2E' }} />
+          <h2 className="text-xl font-black text-navy uppercase mb-2">Joining Vote Room</h2>
+          <p className="text-navy/50 text-sm font-medium">Connecting to {code}...</p>
         </div>
       </div>
     )
@@ -102,8 +104,8 @@ export default function VotePage() {
       <div className="flex items-center justify-center px-4" style={{ minHeight: '60vh' }}>
         <div className="text-center">
           <p className="text-5xl mb-4">😔</p>
-          <h2 className="text-xl font-black text-white uppercase mb-2">Can't Connect</h2>
-          <p className="text-white/40 text-sm font-medium">The voting room may have closed. Ask the host for a new code.</p>
+          <h2 className="text-xl font-black text-navy uppercase mb-2">Can't Connect</h2>
+          <p className="text-navy/50 text-sm font-medium">The voting room may have closed. Ask the host for a new code.</p>
         </div>
       </div>
     )
@@ -114,9 +116,9 @@ export default function VotePage() {
     return (
       <div className="flex flex-col gap-4 max-w-3xl mx-auto px-4 py-6">
         <div className="text-center">
-          <p className="text-[10px] font-black text-white/30 uppercase mb-0.5">The prompt was</p>
-          <p className="text-lg font-black text-white">"{targetPrompt}"</p>
-          <p className="text-sm text-white/50 font-bold mt-2 uppercase">Tap the image you think is better!</p>
+          <p className="text-[10px] font-black text-navy/40 uppercase mb-0.5">The prompt was</p>
+          <p className="text-lg font-black text-navy">"{targetPrompt}"</p>
+          <p className="text-sm text-navy/60 font-bold mt-2 uppercase">Tap the image you think is better!</p>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
@@ -170,13 +172,13 @@ export default function VotePage() {
       <div className="flex flex-col gap-4 max-w-3xl mx-auto px-4 py-6">
         <div className="text-center">
           <p className="text-5xl mb-3">🗳️</p>
-          <h2 className="text-xl font-black text-white uppercase mb-2">Vote Cast!</h2>
-          <p className="text-white/40 text-sm font-medium">
-            You voted for <span className="font-black text-white">{myVote === 'A' ? labelA : labelB}</span>
+          <h2 className="text-xl font-black text-navy uppercase mb-2">Vote Cast!</h2>
+          <p className="text-navy/50 text-sm font-medium">
+            You voted for <span className="font-black text-navy">{myVote === 'A' ? labelA : labelB}</span>
           </p>
-          <p className="text-white/30 text-xs font-medium mt-2">Waiting for results...</p>
+          <p className="text-navy/40 text-xs font-medium mt-2">Waiting for results...</p>
           <div className="animate-spin rounded-full mx-auto mt-4"
-            style={{ width: 24, height: 24, border: '3px solid #ffffff22', borderTopColor: '#C8FF00' }} />
+            style={{ width: 24, height: 24, border: '3px solid #1A1A2E22', borderTopColor: '#1A1A2E' }} />
         </div>
 
         {/* Show both images with vote badge */}
@@ -211,10 +213,10 @@ export default function VotePage() {
       <div className="flex flex-col gap-4 max-w-3xl mx-auto px-4 py-6">
         <div className="text-center">
           <p className="text-5xl mb-3">🏆</p>
-          <h2 className="text-2xl font-black text-white uppercase mb-1">
+          <h2 className="text-2xl font-black text-navy uppercase mb-1">
             {winnerLabel ? `${winnerLabel} Wins!` : "It's a Tie!"}
           </h2>
-          <p className="text-white/40 text-sm font-medium">{totalVotes} vote{totalVotes !== 1 ? 's' : ''} cast</p>
+          <p className="text-navy/50 text-sm font-medium">{totalVotes} vote{totalVotes !== 1 ? 's' : ''} cast</p>
         </div>
 
         <div className="grid grid-cols-2 gap-4">

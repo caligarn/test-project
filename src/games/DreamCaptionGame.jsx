@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { addScore } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { addScore, safeGetItem, safeSetItem, createEntryId } from '../lib/storage'
+import { useAuth } from '../context/authContext'
 import { generateImage } from '../lib/fal'
 
 const DREAM_PROMPTS = [
@@ -29,9 +29,8 @@ const STORAGE_KEY = 'ai_arcade_dream_captions'
 export default function DreamCaptionGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
-  const [gallery, setGallery] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
+  const [gallery, setGallery] = useState(() => safeGetItem(STORAGE_KEY, []))
   const [imageUrl, setImageUrl] = useState(null)
-  const [dreamPrompt, setDreamPrompt] = useState(null)
   const [caption, setCaption] = useState('')
   const [phase, setPhase] = useState('idle') // idle, generating, captioning, submitted
   const [error, setError] = useState(null)
@@ -42,7 +41,6 @@ export default function DreamCaptionGame({ game }) {
     setError(null)
     setCaption('')
     const prompt = DREAM_PROMPTS[Math.floor(Math.random() * DREAM_PROMPTS.length)]
-    setDreamPrompt(prompt)
     try {
       const url = await generateImage(`Surreal dreamlike artwork: ${prompt}. Ethereal, mystical, impossible, dreamscape.`)
       setImageUrl(url)
@@ -65,7 +63,7 @@ export default function DreamCaptionGame({ game }) {
     const pts = lengthScore + punctuationBonus + poeticBonus + 25 // base 25
 
     const entry = {
-      id: Date.now(),
+      id: createEntryId(),
       imageUrl,
       caption: caption.trim(),
       author: username,
@@ -75,7 +73,7 @@ export default function DreamCaptionGame({ game }) {
 
     const updated = [entry, ...gallery].slice(0, 50)
     setGallery(updated)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+    safeSetItem(STORAGE_KEY, updated)
     setScore(s => s + pts)
     addScore(game.id, username, pts, { caption: caption.trim() })
     setPhase('submitted')
@@ -86,12 +84,11 @@ export default function DreamCaptionGame({ game }) {
       g.id === entryId ? { ...g, votes: (g.votes || 0) + 1 } : g
     )
     setGallery(updated)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+    safeSetItem(STORAGE_KEY, updated)
   }
 
   const newDream = () => {
     setImageUrl(null)
-    setDreamPrompt(null)
     setCaption('')
     setPhase('idle')
   }

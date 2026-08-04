@@ -9,7 +9,7 @@ import {
   Star,
   Coins,
 } from 'lucide-react'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/authContext'
 import { setSubscription, getCredits, addCredits } from '../lib/storage'
 
 const PLANS = [
@@ -22,7 +22,7 @@ const PLANS = [
     cardClass: 'brutalist-card',
     btnClass: 'bg-surface-lighter text-navy/50 border-navy',
     features: [
-      'Access to all 10 games',
+      'Access to every game',
       '3 free credits per day',
       'Basic leaderboards',
       'Community features',
@@ -42,7 +42,7 @@ const PLANS = [
     btnClass: 'bg-highlight text-navy border-navy',
     popular: true,
     features: [
-      'All 10 games unlocked',
+      'Every game unlocked',
       'Ad-free experience',
       '50 credits per month included',
       'Premium leaderboards',

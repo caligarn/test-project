@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { addScore } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { addScore, safeGetItem, safeSetItem, createEntryId } from '../lib/storage'
+import { useAuth } from '../context/authContext'
 import { generateImage } from '../lib/fal'
 
 const SCENES = [
@@ -30,7 +30,7 @@ const STORAGE_KEY = 'ai_arcade_before_after'
 export default function BeforeAfterGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
-  const [gallery, setGallery] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
+  const [gallery, setGallery] = useState(() => safeGetItem(STORAGE_KEY, []))
   const [phase, setPhase] = useState('idle') // idle, pick, custom, generating-before, generating-after, result
   const [scene, setScene] = useState(null)
   const [beforeUrl, setBeforeUrl] = useState(null)
@@ -67,8 +67,10 @@ export default function BeforeAfterGame({ game }) {
     setTransformation(label)
     setPhase('generating-after')
 
-    // Strip emoji prefix for prompt
-    const clean = label.replace(/^[\p{Emoji}\s]+/u, '').trim() || label
+    // Strip the decorative emoji prefix from the preset labels. \p{Emoji} also
+    // matches ASCII digits, so match presentation-form emoji only — otherwise a
+    // custom transformation like "1980s neon" loses its leading digit.
+    const clean = label.replace(/^[\p{Extended_Pictographic}\uFE0F\s]+/u, '').trim() || label
     const afterPrompt = `${scene.prompt}, but transformed: ${clean}, dramatic transformation, detailed`
 
     try {
@@ -76,7 +78,7 @@ export default function BeforeAfterGame({ game }) {
       setAfterUrl(url)
 
       const entry = {
-        id: Date.now(),
+        id: createEntryId(),
         scene: scene.scene,
         beforeUrl,
         afterUrl: url,
@@ -91,7 +93,7 @@ export default function BeforeAfterGame({ game }) {
 
       const updated = [entry, ...gallery].slice(0, 40)
       setGallery(updated)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+      safeSetItem(STORAGE_KEY, updated)
       setPhase('result')
     } catch {
       setError('After image generation failed.')
@@ -104,7 +106,7 @@ export default function BeforeAfterGame({ game }) {
       g.id === entryId ? { ...g, votes: (g.votes || 0) + 1 } : g
     )
     setGallery(updated)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+    safeSetItem(STORAGE_KEY, updated)
   }
 
   const mine = gallery.filter(g => g.author === username).length

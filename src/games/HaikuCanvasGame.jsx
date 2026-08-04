@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { addScore } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { addScore, safeGetItem, safeSetItem, createEntryId } from '../lib/storage'
+import { useAuth } from '../context/authContext'
 import { generateImage } from '../lib/fal'
 
 const STORAGE_KEY = 'ai_arcade_haiku_gallery'
@@ -32,7 +32,7 @@ export default function HaikuCanvasGame({ game }) {
   const username = user?.username || 'guest'
   const [lines, setLines] = useState(['', '', ''])
   const [style, setStyle] = useState('watercolor')
-  const [gallery, setGallery] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
+  const [gallery, setGallery] = useState(() => safeGetItem(STORAGE_KEY, []))
   const [generating, setGenerating] = useState(false)
   const [score, setScore] = useState(0)
   const [error, setError] = useState(null)
@@ -53,16 +53,17 @@ export default function HaikuCanvasGame({ game }) {
         `${selectedStyle.prompt} artwork inspired by haiku: "${haiku}". Evocative, artistic, beautiful mood.`,
         { width: 768, height: 512 }
       )
-      const entry = { id: Date.now(), url, lines: [...lines], style, author: username }
+      const entry = { id: createEntryId(), url, lines: [...lines], style, author: username }
       const updated = [entry, ...gallery].slice(0, 30)
       setGallery(updated)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+      safeSetItem(STORAGE_KEY, updated)
       const pts = game.pointsPerAction || 75
       setScore(s => s + pts)
       addScore(game.id, username, pts, { haiku })
       setLines(['', '', ''])
     } catch (err) {
-      setError('Generation failed — check your Fal.ai key and try again.')
+      console.error(err)
+      setError('Image generation failed. Check your connection or API key, then try again.')
     } finally {
       setGenerating(false)
     }

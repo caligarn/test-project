@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { addScore, getScores } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { addScore, getScores, safeGetItem, safeSetItem } from '../lib/storage'
+import { useAuth } from '../context/authContext'
 import { generateImage } from '../lib/fal'
 
 const TILE_PX = 130
@@ -12,11 +12,11 @@ function userStorageKey(username) {
 }
 
 function loadTiles(username) {
-  return JSON.parse(localStorage.getItem(userStorageKey(username)) || '{}')
+  return safeGetItem(userStorageKey(username), {})
 }
 
 function saveTiles(username, tiles) {
-  localStorage.setItem(userStorageKey(username), JSON.stringify(tiles))
+  safeSetItem(userStorageKey(username), tiles)
 }
 
 function loadScore(username) {
@@ -81,6 +81,14 @@ export default function InfinimapGame({ game }) {
   const [pendingCoord, setPendingCoord] = useState(null)
   const [score, setScore] = useState(() => loadScore(username))
   const [error, setError] = useState(null)
+
+  // Tiles are stored per user, so swap boards if the signed-in user changes
+  // while the game is mounted — otherwise one player's tiles get written
+  // under another's key.
+  useEffect(() => {
+    setTiles(loadTiles(username))
+    setScore(loadScore(username))
+  }, [username])
 
   // Camera: which tile coords are at the top-left of the viewport
   const [camera, setCamera] = useState({ col: 0, row: 0 })
@@ -164,7 +172,7 @@ export default function InfinimapGame({ game }) {
       setScore(s => s + pts)
       addScore(game.id, username, pts, { prompt: prompt.trim(), tile: key })
     } catch {
-      setError('Generation failed — check your Fal.ai key.')
+      setError('Image generation failed. Check your connection or API key, then try again.')
     } finally {
       setLoadingTile(null)
     }
