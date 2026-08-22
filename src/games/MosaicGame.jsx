@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { addScore } from '../lib/storage'
 import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
+import { useLocalGallery } from '../hooks/useLocalGallery'
+import ErrorBanner from '../components/game/ErrorBanner'
+import GameImage from '../components/game/GameImage'
 
 const STORAGE_KEY = 'ai_arcade_mosaic'
 const ACCENT_COLORS = ['#FF2D55','#C8FF00','#FF6B35','#FFD600','#8B5CF6','#00D4FF','#FF9500','#34D399']
@@ -9,14 +12,19 @@ const ACCENT_COLORS = ['#FF2D55','#C8FF00','#FF6B35','#FFD600','#8B5CF6','#00D4F
 export default function MosaicGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
-  const [pieces, setPieces] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
+  const { items: pieces, add: addPiece } = useLocalGallery(STORAGE_KEY, { cap: 60, mode: 'append' })
   const [prompt, setPrompt] = useState('')
   const [accent, setAccent] = useState(ACCENT_COLORS[0])
   const [generating, setGenerating] = useState(false)
   const [score, setScore] = useState(0)
   const [showForm, setShowForm] = useState(false)
   const [error, setError] = useState(null)
-  const [hover, setHover] = useState(null)
+
+  const aliveRef = useRef(true)
+  useEffect(() => {
+    aliveRef.current = true
+    return () => { aliveRef.current = false }
+  }, [])
 
   const handleCreate = async (e) => {
     e.preventDefault()
@@ -28,19 +36,19 @@ export default function MosaicGame({ game }) {
         `${prompt.trim()}, mosaic tile art, colorful geometric abstract, vibrant`,
         { width: 512, height: 512 }
       )
-      const piece = { id: Date.now(), url, prompt: prompt.trim(), accent, author: username }
-      const updated = [...pieces, piece].slice(-60)
-      setPieces(updated)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+      if (!aliveRef.current) return
+      const piece = { id: crypto.randomUUID(), url, prompt: prompt.trim(), accent, author: username }
+      addPiece(piece)
       const pts = game.pointsPerAction || 60
       setScore(s => s + pts)
       addScore(game.id, username, pts, { prompt })
       setPrompt('')
       setShowForm(false)
-    } catch (err) {
-      setError('Generation failed — check your Fal.ai key.')
+    } catch {
+      if (!aliveRef.current) return
+      setError('Image generation failed — please try again.')
     } finally {
-      setGenerating(false)
+      if (aliveRef.current) setGenerating(false)
     }
   }
 
@@ -51,22 +59,15 @@ export default function MosaicGame({ game }) {
       {/* Stats + toggle */}
       <div className="flex items-center justify-between brutalist-card p-4">
         <div><p className="text-xs font-black text-navy/50 uppercase">My Pieces</p><p className="text-3xl font-black text-navy">{mine}</p></div>
-        <div className="flex gap-2">
-          <button onClick={() => { setShowForm(false) }}
-            className="px-3 py-2 text-xs font-black uppercase transition-colors"
-            style={{ border: '2px solid #1A1A2E', background: !showForm ? '#1A1A2E' : 'white', color: !showForm ? 'white' : '#1A1A2E' }}>
-            🧩 Mosaic
-          </button>
-          <button onClick={() => { setShowForm(true); setError(null) }}
-            className="px-3 py-2 text-xs font-black uppercase transition-colors"
-            style={{ border: '2px solid #1A1A2E', background: showForm ? '#FF2D55' : 'white', color: showForm ? 'white' : '#1A1A2E' }}>
-            + Add Piece
-          </button>
-        </div>
+        <button onClick={() => { setShowForm(true); setError(null) }}
+          className="px-3 py-2 text-xs font-black uppercase transition-colors"
+          style={{ border: '2px solid #1A1A2E', background: showForm ? '#FF2D55' : 'white', color: showForm ? 'white' : '#1A1A2E' }}>
+          + Add Piece
+        </button>
         <div className="text-right"><p className="text-xs font-black text-navy/50 uppercase">Score</p><p className="text-3xl font-black text-primary">{score}</p></div>
       </div>
 
-      {error && <div className="p-3 bg-red-50 border-2 border-red-400 text-red-700 text-sm font-medium">{error}</div>}
+      <ErrorBanner message={error} />
 
       {showForm ? (
         <form onSubmit={handleCreate} className="brutalist-card p-6 flex flex-col gap-4">
@@ -107,15 +108,14 @@ export default function MosaicGame({ game }) {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 4 }}>
           {pieces.map(piece => (
-            <div key={piece.id} style={{ position: 'relative', aspectRatio: '1', overflow: 'hidden', border: `3px solid ${piece.accent}`, cursor: 'pointer' }}
-              onMouseEnter={() => setHover(piece.id)} onMouseLeave={() => setHover(null)}>
-              <img src={piece.url} alt={piece.prompt} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-              {hover === piece.id && (
-                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.82)', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'flex-end', padding: 6 }}>
-                  <p style={{ color: 'rgba(255,255,255,0.85)', fontSize: 9, textAlign: 'right', lineHeight: 1.3 }}>{piece.prompt}</p>
-                  <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 9 }}>— {piece.author}</p>
-                </div>
-              )}
+            <div key={piece.id} className="group" style={{ position: 'relative', aspectRatio: '1', overflow: 'hidden', border: `3px solid ${piece.accent}`, cursor: 'pointer' }}>
+              <GameImage src={piece.url} alt={piece.prompt} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+              <div
+                className="opacity-0 group-hover:opacity-100 transition-opacity"
+                style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.82)', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'flex-end', padding: 6 }}>
+                <p style={{ color: 'rgba(255,255,255,0.85)', fontSize: 9, textAlign: 'right', lineHeight: 1.3 }}>{piece.prompt}</p>
+                <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 9 }}>— {piece.author}</p>
+              </div>
             </div>
           ))}
         </div>
