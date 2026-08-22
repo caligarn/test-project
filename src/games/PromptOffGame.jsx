@@ -763,7 +763,7 @@ export default function PromptOffGame({ game }) {
         </div>
 
         {/* Two image boxes side by side, centered */}
-        <div className="grid grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
           {/* YOUR SIDE */}
           <div className="flex flex-col gap-3">
             <p className="text-sm font-black text-accent uppercase text-center">You ({username})</p>
@@ -857,8 +857,6 @@ export default function PromptOffGame({ game }) {
               </div>
             </div>
 
-            {/* Hidden canvas for receiving opponent sketch data */}
-            <canvas ref={opponentCanvasRef} width={512} height={512} style={{ display: 'none' }} />
           </div>
         </div>
 
@@ -890,7 +888,7 @@ export default function PromptOffGame({ game }) {
         </div>
 
         {/* Show both live outputs side by side while waiting */}
-        <div className="grid grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
           <div className="flex flex-col gap-2">
             <p className="text-sm font-black text-accent uppercase text-center">You ({username})</p>
             <div style={{ border: '3px solid #C8FF00', aspectRatio: '1', overflow: 'hidden' }}>
@@ -948,11 +946,11 @@ export default function PromptOffGame({ game }) {
           const myPct = totalVotes > 0 ? Math.round((myVotes / totalVotes) * 100) : 0
           const theirPct = totalVotes > 0 ? Math.round((theirVotes / totalVotes) * 100) : 0
           return (
-            <div className="grid grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
               {/* Your image */}
               <div className="flex flex-col gap-2">
                 <p className="text-sm font-black text-accent uppercase text-center">{username}</p>
-                <div style={{ border: `3px solid ${votingClosed && myVotes >= theirVotes ? '#C8FF00' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
+                <div style={{ border: `3px solid ${votingClosed && myVotes > theirVotes ? '#C8FF00' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
                   {myFinalUrl ? (
                     <img src={myFinalUrl} alt="Your final" className="w-full h-full" style={{ objectFit: 'cover', display: 'block' }} />
                   ) : (
@@ -980,7 +978,7 @@ export default function PromptOffGame({ game }) {
               {/* Opponent's image */}
               <div className="flex flex-col gap-2">
                 <p className="text-sm font-black text-primary uppercase text-center">{opponentName}</p>
-                <div style={{ border: `3px solid ${votingClosed && theirVotes >= myVotes ? '#FF2D55' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
+                <div style={{ border: `3px solid ${votingClosed && theirVotes > myVotes ? '#FF2D55' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
                   {opponentFinalUrl ? (
                     <img src={opponentFinalUrl} alt="Opponent final" className="w-full h-full" style={{ objectFit: 'cover', display: 'block' }} />
                   ) : (
