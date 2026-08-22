@@ -32,6 +32,7 @@ const PROMPTS = [
 const BRUSH_COLORS = ['#1A1A2E', '#FF2D55', '#FF6B35', '#FFD600', '#C8FF00', '#00D4FF', '#8B5CF6', '#FFFFFF']
 const BRUSH_SIZES = [3, 8, 16]
 const GAME_DURATION = 60
+const COUNTDOWN_SECONDS = 3
 
 function generateRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -69,7 +70,6 @@ export default function PromptOffGame({ game }) {
   // Drawing
   const [brushColor, setBrushColor] = useState('#1A1A2E')
   const [brushSize, setBrushSize] = useState(8)
-  const [isDrawingActive, setIsDrawingActive] = useState(false)
 
   // Voting (audience)
   const [voteRoomCode, setVoteRoomCode] = useState('')
@@ -77,30 +77,42 @@ export default function PromptOffGame({ game }) {
   const [audienceCount, setAudienceCount] = useState(0)
   const [votingClosed, setVotingClosed] = useState(false)
 
-  // Legacy voting (kept for peer message compat)
-  const [myVote, setMyVote] = useState(null)
-  const [opponentVote, setOpponentVote] = useState(null)
-
   // Refs
   const peerRef = useRef(null)
   const connRef = useRef(null)
   const canvasRef = useRef(null)
-  const opponentCanvasRef = useRef(null)
   const timerRef = useRef(null)
-  const lastPointRef = useRef(null)
+  const joinTimeoutRef = useRef(null)
   const phaseRef = useRef(phase)
   const realtimeRef = useRef(null)
   const generateDebounceRef = useRef(null)
   const generatingRef = useRef(false)
   const pendingGenerateRef = useRef(false)
+  const isDrawingActiveRef = useRef(false)
+  const hasDrawnRef = useRef(false)
   const myPromptRef = useRef('')
+  const endsAtRef = useRef(null)
   const scoredRef = useRef(false)
   const votePeerRef = useRef(null)
   const voteConnectionsRef = useRef([])
   const audienceVotesRef = useRef({ A: 0, B: 0 })
+  const votingClosedRef = useRef(false)
+  const votedPeerIdsRef = useRef(new Set())
+  const myLiveUrlRef = useRef(null)
+  const opponentLiveUrlRef = useRef(null)
+  const myFinalUrlRef = useRef(null)
+  const opponentFinalUrlRef = useRef(null)
+  const opponentNameRef = useRef('Opponent')
+  const targetPromptRef = useRef('')
 
   useEffect(() => { phaseRef.current = phase }, [phase])
   useEffect(() => { myPromptRef.current = myPromptText }, [myPromptText])
+  useEffect(() => { myLiveUrlRef.current = myLiveUrl }, [myLiveUrl])
+  useEffect(() => { opponentLiveUrlRef.current = opponentLiveUrl }, [opponentLiveUrl])
+  useEffect(() => { myFinalUrlRef.current = myFinalUrl }, [myFinalUrl])
+  useEffect(() => { opponentFinalUrlRef.current = opponentFinalUrl }, [opponentFinalUrl])
+  useEffect(() => { opponentNameRef.current = opponentName }, [opponentName])
+  useEffect(() => { targetPromptRef.current = targetPrompt }, [targetPrompt])
 
   // ---------- PEER MESSAGING ----------
 
@@ -115,10 +127,8 @@ export default function PromptOffGame({ game }) {
         break
       case 'start':
         setTargetPrompt(msg.prompt)
+        endsAtRef.current = msg.endsAt || (Date.now() + (COUNTDOWN_SECONDS + GAME_DURATION) * 1000)
         setPhase('countdown')
-        break
-      case 'canvas':
-        loadImageToCanvas(opponentCanvasRef.current, msg.data)
         break
       case 'live':
         setOpponentLiveUrl(msg.url)
@@ -127,14 +137,11 @@ export default function PromptOffGame({ game }) {
         setOpponentFinalUrl(msg.url)
         setOpponentFinalPrompt(msg.prompt)
         break
-      case 'vote':
-        setOpponentVote(msg.vote)
-        break
       case 'vote-room':
         setVoteRoomCode(msg.code)
         break
       case 'vote-results':
-        setAudienceVotes({ A: msg.votesA, B: msg.votesB })
+        setAudienceVotes({ A: msg.results.votesA, B: msg.results.votesB })
         setVotingClosed(true)
         break
       case 'rematch':
@@ -145,20 +152,10 @@ export default function PromptOffGame({ game }) {
     }
   }, [])
 
-  function loadImageToCanvas(canvas, dataUrl) {
-    if (!canvas) return
-    const img = new Image()
-    img.onload = () => {
-      const ctx = canvas.getContext('2d')
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      ctx.drawImage(img, 0, 0)
-    }
-    img.src = dataUrl
-  }
-
   const setupConn = useCallback((conn) => {
     connRef.current = conn
     conn.on('open', () => {
+      if (joinTimeoutRef.current) { clearTimeout(joinTimeoutRef.current); joinTimeoutRef.current = null }
       setConnected(true)
       conn.send({ type: 'hello', name: username })
     })
@@ -176,6 +173,7 @@ export default function PromptOffGame({ game }) {
 
   function cleanupPeer() {
     if (timerRef.current) clearInterval(timerRef.current)
+    if (joinTimeoutRef.current) { clearTimeout(joinTimeoutRef.current); joinTimeoutRef.current = null }
     if (realtimeRef.current) { try { realtimeRef.current.close() } catch {} realtimeRef.current = null }
     if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
     if (connRef.current) { connRef.current.close(); connRef.current = null }
@@ -197,8 +195,20 @@ export default function PromptOffGame({ game }) {
     setPhase('waiting')
     const peer = new Peer(`promptoff-${code}`)
     peerRef.current = peer
-    peer.on('connection', (conn) => setupConn(conn))
+    peer.on('connection', (conn) => {
+      // Only accept a single opponent, and only while waiting in the lobby room
+      if (connRef.current?.open || phaseRef.current !== 'waiting') {
+        conn.close()
+        return
+      }
+      setupConn(conn)
+    })
     peer.on('error', (err) => {
+      const transient = err.type === 'network' || err.type === 'disconnected' || err.type === 'server-error'
+      if (transient && connRef.current?.open) {
+        console.warn('PeerJS transient error (ignored, game in progress):', err.type)
+        return
+      }
       setError(err.type === 'unavailable-id' ? 'Room code taken. Try again.' : 'Connection failed. Check your network.')
       setPhase('lobby')
       cleanupPeer()
@@ -216,7 +226,8 @@ export default function PromptOffGame({ game }) {
       const conn = peer.connect(`promptoff-${joinCode.trim().toUpperCase()}`, { reliable: true })
       setupConn(conn)
       setPhase('waiting')
-      setTimeout(() => {
+      joinTimeoutRef.current = setTimeout(() => {
+        joinTimeoutRef.current = null
         if (!connRef.current?.open) {
           setError('Could not connect. Check the room code.')
           setPhase('lobby')
@@ -224,7 +235,12 @@ export default function PromptOffGame({ game }) {
         }
       }, 10000)
     })
-    peer.on('error', () => {
+    peer.on('error', (err) => {
+      const transient = err.type === 'network' || err.type === 'disconnected' || err.type === 'server-error'
+      if (transient && connRef.current?.open) {
+        console.warn('PeerJS transient error (ignored, game in progress):', err.type)
+        return
+      }
       setError('Could not connect. Check the room code.')
       setPhase('lobby')
       cleanupPeer()
@@ -234,7 +250,9 @@ export default function PromptOffGame({ game }) {
   function startGame() {
     const prompt = PROMPTS[Math.floor(Math.random() * PROMPTS.length)]
     setTargetPrompt(prompt)
-    send({ type: 'start', prompt })
+    const endsAt = Date.now() + (COUNTDOWN_SECONDS + GAME_DURATION) * 1000
+    endsAtRef.current = endsAt
+    send({ type: 'start', prompt, endsAt })
     setPhase('countdown')
   }
 
@@ -242,7 +260,7 @@ export default function PromptOffGame({ game }) {
 
   useEffect(() => {
     if (phase !== 'countdown') return
-    setCountdownNum(3)
+    setCountdownNum(COUNTDOWN_SECONDS)
     const interval = setInterval(() => {
       setCountdownNum(prev => {
         if (prev <= 1) { clearInterval(interval); setPhase('playing'); return 0 }
@@ -256,16 +274,10 @@ export default function PromptOffGame({ game }) {
 
   useEffect(() => {
     if (phase !== 'playing') return
-    setTimeLeft(GAME_DURATION)
-    // Canvas may be inside a collapsed <details>, init when available
-    const initWhenReady = () => {
-      if (canvasRef.current) initCanvas(canvasRef.current)
-      if (opponentCanvasRef.current) initCanvas(opponentCanvasRef.current)
-    }
-    initWhenReady()
-    // Also observe for when canvas becomes available (details opened)
-    const observer = new MutationObserver(initWhenReady)
-    observer.observe(document.body, { childList: true, subtree: true })
+    if (!endsAtRef.current) endsAtRef.current = Date.now() + GAME_DURATION * 1000
+    setTimeLeft(Math.max(0, Math.round((endsAtRef.current - Date.now()) / 1000)))
+    // The canvas is mounted from the start (inside <details>), init it once
+    initCanvas(canvasRef.current)
     scoredRef.current = false
 
     // Try to set up real-time connection
@@ -282,18 +294,15 @@ export default function PromptOffGame({ game }) {
     }
 
     timerRef.current = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(timerRef.current)
-          handleTimeUp()
-          return 0
-        }
-        return prev - 1
-      })
+      const remaining = Math.max(0, Math.round((endsAtRef.current - Date.now()) / 1000))
+      setTimeLeft(remaining)
+      if (remaining <= 0) {
+        clearInterval(timerRef.current)
+        handleTimeUp()
+      }
     }, 1000)
 
     return () => {
-      observer.disconnect()
       if (timerRef.current) clearInterval(timerRef.current)
       if (realtimeRef.current) { try { realtimeRef.current.close() } catch {} realtimeRef.current = null }
       if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
@@ -305,28 +314,17 @@ export default function PromptOffGame({ game }) {
     const ctx = canvas.getContext('2d')
     ctx.fillStyle = '#FFFFFF'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
+    hasDrawnRef.current = false
   }
 
   // ---------- REAL-TIME GENERATION ----------
-
-  function isCanvasBlank(canvas) {
-    if (!canvas) return true
-    const ctx = canvas.getContext('2d')
-    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
-    // Check a sample of pixels — if all white, canvas is blank
-    for (let i = 0; i < data.length; i += 400) {
-      if (data[i] < 250 || data[i + 1] < 250 || data[i + 2] < 250) return false
-    }
-    return true
-  }
 
   function triggerRealtimeGeneration() {
     if (phaseRef.current !== 'playing') return
     const canvas = canvasRef.current
     const prompt = myPromptRef.current.trim()
-    if (!prompt && (!canvas || isCanvasBlank(canvas))) return
-
-    const blank = isCanvasBlank(canvas)
+    const blank = !hasDrawnRef.current
+    if (!prompt && blank) return
 
     // If canvas has drawing, use image-to-image with realtime connection
     if (!blank && canvas) {
