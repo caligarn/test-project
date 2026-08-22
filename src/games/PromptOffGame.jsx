@@ -294,6 +294,48 @@ export default function PromptOffGame({ game }) {
     return () => clearInterval(interval)
   }, [phase])
 
+  // ---------- CANVAS INIT / TIME UP / SUBMIT ----------
+
+  function initCanvas(canvas) {
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    ctx.fillStyle = '#FFFFFF'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    hasDrawnRef.current = false
+  }
+
+  async function submitFinal(promptText) {
+    if (timerRef.current) clearInterval(timerRef.current)
+    if (realtimeRef.current) { try { realtimeRef.current.close() } catch { /* ignore */ } realtimeRef.current = null }
+    setPhase('generating')
+    setMyFinalPrompt(promptText)
+    try {
+      const canvas = canvasRef.current
+      const canvasData = canvas ? canvas.toDataURL('image/jpeg', 0.6) : null
+      let url
+      if (canvasData) {
+        url = await generateFromSketch(promptText, canvasData, { strength: 0.6 })
+      } else {
+        url = await generateImage(promptText)
+      }
+      setMyFinalUrl(url)
+      send({ type: 'final', url, prompt: promptText })
+    } catch {
+      const fallback = myLiveUrlRef.current || ''
+      setMyFinalUrl(fallback)
+      send({ type: 'final', url: fallback, prompt: promptText })
+    }
+  }
+
+  async function handleTimeUp() {
+    await submitFinal(myPromptRef.current.trim() || 'abstract art')
+  }
+
+  async function handleSubmitEarly() {
+    if (!myPromptText.trim()) return
+    await submitFinal(myPromptText.trim())
+  }
+
   // ---------- GAME TIMER ----------
 
   useEffect(() => {
@@ -332,14 +374,6 @@ export default function PromptOffGame({ game }) {
       if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
     }
   }, [phase])
-
-  function initCanvas(canvas) {
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    ctx.fillStyle = '#FFFFFF'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    hasDrawnRef.current = false
-  }
 
   // ---------- REAL-TIME GENERATION ----------
 
@@ -404,40 +438,6 @@ export default function PromptOffGame({ game }) {
     triggerRealtimeGeneration()
   }, [myPromptText, phase])
 
-  // ---------- TIME UP / SUBMIT ----------
-
-  async function submitFinal(promptText) {
-    if (timerRef.current) clearInterval(timerRef.current)
-    if (realtimeRef.current) { try { realtimeRef.current.close() } catch { /* ignore */ } realtimeRef.current = null }
-    setPhase('generating')
-    setMyFinalPrompt(promptText)
-    try {
-      const canvas = canvasRef.current
-      const canvasData = canvas ? canvas.toDataURL('image/jpeg', 0.6) : null
-      let url
-      if (canvasData) {
-        url = await generateFromSketch(promptText, canvasData, { strength: 0.6 })
-      } else {
-        url = await generateImage(promptText)
-      }
-      setMyFinalUrl(url)
-      send({ type: 'final', url, prompt: promptText })
-    } catch {
-      const fallback = myLiveUrlRef.current || ''
-      setMyFinalUrl(fallback)
-      send({ type: 'final', url: fallback, prompt: promptText })
-    }
-  }
-
-  async function handleTimeUp() {
-    await submitFinal(myPromptRef.current.trim() || 'abstract art')
-  }
-
-  async function handleSubmitEarly() {
-    if (!myPromptText.trim()) return
-    await submitFinal(myPromptText.trim())
-  }
-
   // Move to voting when both finals are in, or after timeout
   useEffect(() => {
     if (phase !== 'generating') return
@@ -466,6 +466,17 @@ export default function PromptOffGame({ game }) {
   }, [myFinalUrl, opponentFinalUrl, phase, myLiveUrl, opponentLiveUrl])
 
   // ---------- AUDIENCE VOTING ROOM ----------
+
+  function buildVoteData() {
+    return {
+      type: 'vote-data',
+      prompt: targetPromptRef.current,
+      imageA: myFinalUrlRef.current || myLiveUrlRef.current || '',
+      imageB: opponentFinalUrlRef.current || opponentLiveUrlRef.current || '',
+      labelA: username,
+      labelB: opponentNameRef.current,
+    }
+  }
 
   useEffect(() => {
     if (phase !== 'voting') return
