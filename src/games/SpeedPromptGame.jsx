@@ -1,7 +1,14 @@
-import { useState, useEffect, useRef } from 'react'
-import { addScore } from '../lib/storage'
+import { useState, useRef } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
+import { useGameRounds } from '../hooks/useGameRounds'
+import { useRoundTimer } from '../hooks/useRoundTimer'
+import { pickRandom } from '../lib/similarity'
+import StatsBar from '../components/game/StatsBar'
+import GameOverCard from '../components/game/GameOverCard'
+import GeneratingSpinner from '../components/game/GeneratingSpinner'
+import ErrorBanner from '../components/game/ErrorBanner'
+import GameImage from '../components/game/GameImage'
 
 const CONCEPTS = [
   { concept: 'A peaceful morning', hint: 'Think sunrise, coffee, calm...' },
@@ -21,157 +28,133 @@ const CONCEPTS = [
   { concept: 'Storm at sea', hint: 'Think waves, lightning, ships...' },
 ]
 
+const MAX_ROUNDS = 5
+const TIME_LIMIT = 30
+
 export default function SpeedPromptGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
-  const [round, setRound] = useState(1)
-  const [totalScore, setTotalScore] = useState(0)
+  const { round, totalScore, gameOver, token, isStale, recordScore, nextRound, restart } =
+    useGameRounds({ gameId: game.id, username, maxRounds: MAX_ROUNDS })
   const [concept, setConcept] = useState(null)
   const [prompt, setPrompt] = useState('')
-  const [timeLeft, setTimeLeft] = useState(30)
-  const [phase, setPhase] = useState('idle') // idle, writing, generating, result, gameover
+  const [phase, setPhase] = useState('idle') // idle, writing, generating, result
   const [imageUrl, setImageUrl] = useState(null)
   const [error, setError] = useState(null)
   const [roundScore, setRoundScore] = useState(0)
   const [usedConcepts, setUsedConcepts] = useState([])
-  const timerRef = useRef(null)
   const inputRef = useRef(null)
 
-  const maxRounds = 5
-  const timeLimit = 30
-
-  useEffect(() => {
-    return () => { if (timerRef.current) clearInterval(timerRef.current) }
-  }, [])
-
-  const pickConcept = () => {
-    const available = CONCEPTS.filter(c => !usedConcepts.includes(c.concept))
-    const pool = available.length > 0 ? available : CONCEPTS
-    return pool[Math.floor(Math.random() * pool.length)]
-  }
+  // Auto-submit through a latest-render ref so the timer never submits a stale prompt
+  const submitRef = useRef(() => {})
+  const { timeLeft, start: startTimer, stop: stopTimer } = useRoundTimer(() => submitRef.current())
 
   const startRound = () => {
-    const c = pickConcept()
+    const c = pickRandom(CONCEPTS, usedConcepts)
     setConcept(c)
-    setUsedConcepts(prev => [...prev, c.concept])
+    setUsedConcepts(prev => [...prev, c])
     setPrompt('')
-    setTimeLeft(timeLimit)
     setImageUrl(null)
     setError(null)
     setPhase('writing')
-
-    timerRef.current = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(timerRef.current)
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
-
+    startTimer(TIME_LIMIT)
     setTimeout(() => inputRef.current?.focus(), 100)
   }
 
-  // Auto-submit when timer hits 0
-  useEffect(() => {
-    if (timeLeft === 0 && phase === 'writing') {
-      handleSubmit()
-    }
-  }, [timeLeft, phase])
-
   const handleSubmit = async () => {
     if (phase !== 'writing') return
-    if (timerRef.current) clearInterval(timerRef.current)
+    stopTimer()
 
     const finalPrompt = prompt.trim()
     if (!finalPrompt) {
       // No prompt written — 0 points
       setRoundScore(0)
+      recordScore(0)
       setPhase('result')
       return
     }
 
+    // Score: word count bonus + time remaining bonus + detail bonus.
+    // Computable before generation — awarded even if the image fails.
+    const words = finalPrompt.split(/\s+/).length
+    const wordScore = Math.min(50, words * 5)
+    const timeScore = (timeLeft || 0) * 3
+    const detailBonus = finalPrompt.length > 60 ? 20 : finalPrompt.length > 30 ? 10 : 0
+    const pts = wordScore + timeScore + detailBonus
+
     setPhase('generating')
+    const t = token()
     try {
       const url = await generateImage(finalPrompt)
+      if (isStale(t)) return
       setImageUrl(url)
-
-      // Score: word count bonus + time remaining bonus + detail bonus
-      const words = finalPrompt.split(/\s+/).length
-      const wordScore = Math.min(50, words * 5)
-      const timeScore = timeLeft * 3
-      const detailBonus = finalPrompt.length > 60 ? 20 : finalPrompt.length > 30 ? 10 : 0
-      const pts = wordScore + timeScore + detailBonus
-
-      setRoundScore(pts)
-      setTotalScore(s => s + pts)
-      addScore(game.id, username, pts, { prompt: finalPrompt, concept: concept.concept, timeLeft })
     } catch {
-      setError('Generation failed — check your API key.')
-      setRoundScore(0)
+      if (isStale(t)) return
+      setError('The image couldn\'t be generated, but your prompt still scored.')
     }
+    if (isStale(t)) return
+    setRoundScore(pts)
+    recordScore(pts)
     setPhase('result')
   }
+  submitRef.current = handleSubmit
 
-  const nextRound = () => {
-    if (round >= maxRounds) {
-      setPhase('gameover')
-      return
-    }
-    setRound(r => r + 1)
+  const handleNextRound = () => {
+    stopTimer()
+    nextRound()
     setPhase('idle')
   }
 
-  const restart = () => {
-    setRound(1)
-    setTotalScore(0)
+  const handleRestart = () => {
+    stopTimer()
+    restart()
+    setConcept(null)
+    setPrompt('')
+    setImageUrl(null)
+    setError(null)
+    setRoundScore(0)
     setUsedConcepts([])
     setPhase('idle')
   }
 
-  if (phase === 'gameover') {
+  if (gameOver) {
     return (
       <div className="flex flex-col gap-4">
-        <div className="brutalist-card p-8 text-center">
-          <p className="text-5xl mb-4">⚡</p>
-          <h3 className="text-2xl font-black text-navy uppercase mb-2">Time's Up!</h3>
-          <p className="text-4xl font-black text-primary mb-2">{totalScore} pts</p>
-          <p className="text-navy/50 text-sm font-medium mb-6">{maxRounds} rounds completed</p>
-          <button onClick={restart}
-            className="px-8 py-3 bg-primary text-white font-black uppercase text-sm"
-            style={{ border: '2px solid #1A1A2E' }}>
-            Play Again
-          </button>
-        </div>
+        <GameOverCard
+          emoji="⚡"
+          title="Time's Up!"
+          score={`${totalScore} pts`}
+          subtitle={`${MAX_ROUNDS} rounds completed`}
+          onRestart={handleRestart}
+        />
       </div>
     )
   }
 
-  const timerPercent = (timeLeft / timeLimit) * 100
-  const timerColor = timeLeft <= 10 ? '#FF2D55' : timeLeft <= 20 ? '#FFD600' : '#16a34a'
+  const timerPercent = ((timeLeft ?? 0) / TIME_LIMIT) * 100
+  const timerColor = (timeLeft ?? 0) <= 10 ? '#FF2D55' : (timeLeft ?? 0) <= 20 ? '#FFD600' : '#16a34a'
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Stats */}
-      <div className="flex items-center justify-between brutalist-card p-4">
-        <div><p className="text-xs font-black text-navy/50 uppercase">Round</p><p className="text-3xl font-black text-navy">{round}/{maxRounds}</p></div>
-        <div className="text-center">
-          <p className="text-xs font-black text-navy/50 uppercase">Timer</p>
-          <p className="text-3xl font-black" style={{ color: phase === 'writing' ? timerColor : '#1A1A2E' }}>
-            {phase === 'writing' ? `${timeLeft}s` : '—'}
-          </p>
-        </div>
-        <div className="text-right"><p className="text-xs font-black text-navy/50 uppercase">Score</p><p className="text-3xl font-black text-primary">{totalScore}</p></div>
-      </div>
+      <StatsBar
+        stats={[
+          { label: 'Round', value: `${round}/${MAX_ROUNDS}` },
+          {
+            label: 'Timer',
+            value: phase === 'writing' ? `${timeLeft ?? TIME_LIMIT}s` : '—',
+            color: phase === 'writing' ? timerColor : undefined,
+          },
+          { label: 'Score', value: totalScore, color: '#FF2D55' },
+        ]}
+      />
 
-      {error && <div className="p-3 bg-red-50 border-2 border-red-400 text-red-700 text-sm font-medium">{error}</div>}
+      <ErrorBanner message={error} />
 
       {phase === 'idle' && (
         <div className="brutalist-card p-12 text-center">
           <p className="text-5xl mb-4">⚡</p>
           <h3 className="font-black text-navy uppercase mb-2">Round {round}</h3>
-          <p className="text-navy/50 text-sm mb-6 font-medium">You'll get a concept and {timeLimit} seconds to write the best prompt you can!</p>
+          <p className="text-navy/50 text-sm mb-6 font-medium">You'll get a concept and {TIME_LIMIT} seconds to write the best prompt you can!</p>
           <button onClick={startRound}
             className="px-8 py-3 bg-highlight text-navy font-black uppercase text-sm"
             style={{ border: '2px solid #1A1A2E' }}>
@@ -215,7 +198,7 @@ export default function SpeedPromptGame({ game }) {
 
       {phase === 'generating' && (
         <div className="brutalist-card p-12 text-center">
-          <div className="animate-spin rounded-full mx-auto mb-4" style={{ width: 40, height: 40, border: '4px solid #1A1A2E', borderTopColor: 'transparent' }} />
+          <div className="animate-spin rounded-full mx-auto mb-4" style={{ width: 40, height: 40, border: '4px solid #1A1A2E22', borderTopColor: '#1A1A2E' }} />
           <p className="font-black text-navy uppercase">Generating your image...</p>
           <p className="text-navy/50 text-xs font-medium mt-2">"{prompt}"</p>
         </div>
@@ -226,12 +209,14 @@ export default function SpeedPromptGame({ game }) {
           <div>
             {imageUrl ? (
               <div style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
-                <img src={imageUrl} alt="Generated" className="w-full object-cover" style={{ maxHeight: 400 }} />
+                <GameImage src={imageUrl} alt="Generated" className="w-full object-cover" style={{ maxHeight: 400 }} eager />
               </div>
             ) : (
               <div className="brutalist-card p-12 text-center">
                 <p className="text-4xl mb-2">⏱️</p>
-                <p className="font-black text-navy/50 uppercase text-sm">No prompt submitted</p>
+                <p className="font-black text-navy/50 uppercase text-sm">
+                  {prompt.trim() ? 'Image couldn\'t be generated' : 'No prompt submitted'}
+                </p>
               </div>
             )}
           </div>
@@ -242,11 +227,14 @@ export default function SpeedPromptGame({ game }) {
               <p className="text-navy/50 font-bold uppercase text-xs">Concept: "{concept?.concept}"</p>
               {prompt && <p className="text-navy font-medium">Your prompt: "{prompt}"</p>}
               {timeLeft > 0 && prompt && <p className="text-green-600 font-bold text-xs">Time bonus: +{timeLeft * 3} pts</p>}
+              {prompt.trim() && !imageUrl && (
+                <p className="text-navy/50 font-medium text-xs">Note: the image couldn't be generated this round.</p>
+              )}
             </div>
-            <button onClick={nextRound}
+            <button onClick={handleNextRound}
               className="mt-2 w-full py-3 bg-navy text-white font-black uppercase text-sm"
               style={{ border: '2px solid #1A1A2E' }}>
-              {round >= maxRounds ? 'See Final Score' : 'Next Round →'}
+              {round >= MAX_ROUNDS ? 'See Final Score' : 'Next Round →'}
             </button>
           </div>
         </div>

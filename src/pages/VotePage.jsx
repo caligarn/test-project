@@ -14,6 +14,7 @@ export default function VotePage() {
   const [results, setResults] = useState(null)
   const connRef = useRef(null)
   const peerRef = useRef(null)
+  const timeoutRef = useRef(null)
 
   useEffect(() => {
     if (!code) return
@@ -25,7 +26,7 @@ export default function VotePage() {
       connRef.current = conn
 
       conn.on('open', () => {
-        setStatus('connecting')
+        if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null }
         conn.send({ type: 'viewer-hello' })
       })
 
@@ -37,11 +38,13 @@ export default function VotePage() {
             setImageB(msg.imageB)
             setLabelA(msg.labelA || 'Player 1')
             setLabelB(msg.labelB || 'Player 2')
-            setStatus('voting')
+            // Only move into 'voting' if we haven't voted / seen results yet —
+            // the host may re-send vote-data when final images land
+            setStatus(s => (s === 'connecting' || s === 'voting') ? 'voting' : s)
             break
           case 'vote-results':
             setResults(msg.results)
-            if (myVote) setStatus('results')
+            setStatus('results')
             break
           default:
             break
@@ -49,12 +52,13 @@ export default function VotePage() {
       })
 
       conn.on('close', () => {
-        if (status === 'connecting') setStatus('error')
+        setStatus(s => s === 'connecting' ? 'error' : s)
       })
 
       conn.on('error', () => setStatus('error'))
 
-      setTimeout(() => {
+      timeoutRef.current = setTimeout(() => {
+        timeoutRef.current = null
         if (!connRef.current?.open) {
           setStatus('error')
         }
@@ -64,22 +68,19 @@ export default function VotePage() {
     peer.on('error', () => setStatus('error'))
 
     return () => {
+      if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null }
       if (connRef.current) connRef.current.close()
       if (peerRef.current) peerRef.current.destroy()
     }
   }, [code])
 
-  // When results arrive after we already voted, show them
-  useEffect(() => {
-    if (myVote && results) setStatus('results')
-  }, [myVote, results])
-
   function vote(choice) {
+    if (results) return // voting is over once results are in
     setMyVote(choice)
     if (connRef.current?.open) {
       connRef.current.send({ type: 'vote', vote: choice })
     }
-    setStatus(results ? 'results' : 'voted')
+    setStatus('voted')
   }
 
   // CONNECTING
@@ -221,9 +222,9 @@ export default function VotePage() {
           {/* Image A result */}
           <div className="flex flex-col gap-2">
             <p className="text-sm font-black text-[#C8FF00] uppercase text-center">{labelA}</p>
-            <div style={{ border: `3px solid ${results.votesA >= results.votesB ? '#C8FF00' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
+            <div style={{ border: `3px solid ${results.votesA > results.votesB ? '#C8FF00' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
               {imageA && <img src={imageA} alt={labelA} className="w-full h-full" style={{ objectFit: 'cover', display: 'block' }} />}
-              {results.votesA >= results.votesB && results.votesA > 0 && (
+              {results.votesA > results.votesB && (
                 <div className="absolute top-2 left-2 px-2 py-1 text-xs font-black uppercase"
                   style={{ background: '#C8FF00', color: '#1A1A2E' }}>Winner</div>
               )}
@@ -245,9 +246,9 @@ export default function VotePage() {
           {/* Image B result */}
           <div className="flex flex-col gap-2">
             <p className="text-sm font-black text-[#FF2D55] uppercase text-center">{labelB}</p>
-            <div style={{ border: `3px solid ${results.votesB >= results.votesA ? '#FF2D55' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
+            <div style={{ border: `3px solid ${results.votesB > results.votesA ? '#FF2D55' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
               {imageB && <img src={imageB} alt={labelB} className="w-full h-full" style={{ objectFit: 'cover', display: 'block' }} />}
-              {results.votesB >= results.votesA && results.votesB > 0 && (
+              {results.votesB > results.votesA && (
                 <div className="absolute top-2 left-2 px-2 py-1 text-xs font-black uppercase"
                   style={{ background: '#FF2D55', color: '#fff' }}>Winner</div>
               )}
