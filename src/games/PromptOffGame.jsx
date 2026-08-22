@@ -120,6 +120,42 @@ export default function PromptOffGame({ game }) {
     if (connRef.current?.open) connRef.current.send(data)
   }, [])
 
+  function cleanupPeer() {
+    if (timerRef.current) clearInterval(timerRef.current)
+    if (joinTimeoutRef.current) { clearTimeout(joinTimeoutRef.current); joinTimeoutRef.current = null }
+    if (realtimeRef.current) { try { realtimeRef.current.close() } catch { /* ignore */ } realtimeRef.current = null }
+    if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
+    if (connRef.current) { connRef.current.close(); connRef.current = null }
+    if (peerRef.current) { peerRef.current.destroy(); peerRef.current = null }
+    if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
+    voteConnectionsRef.current = []
+    setConnected(false)
+  }
+
+  function resetGame() {
+    setPhase('waiting')
+    setTargetPrompt('')
+    setTimeLeft(GAME_DURATION)
+    setMyPromptText('')
+    setMyLiveUrl(null)
+    setOpponentLiveUrl(null)
+    setMyFinalUrl(null)
+    setMyFinalPrompt('')
+    setOpponentFinalUrl(null)
+    setOpponentFinalPrompt('')
+    setVoteRoomCode('')
+    setAudienceVotes({ A: 0, B: 0 })
+    setAudienceCount(0)
+    setVotingClosed(false)
+    audienceVotesRef.current = { A: 0, B: 0 }
+    votingClosedRef.current = false
+    votedPeerIdsRef.current = new Set()
+    endsAtRef.current = null
+    if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
+    voteConnectionsRef.current = []
+    scoredRef.current = false
+  }
+
   const handleMessage = useCallback((msg) => {
     switch (msg.type) {
       case 'hello':
@@ -170,18 +206,6 @@ export default function PromptOffGame({ game }) {
     })
     conn.on('error', () => setError('Connection error. Try again.'))
   }, [username, handleMessage])
-
-  function cleanupPeer() {
-    if (timerRef.current) clearInterval(timerRef.current)
-    if (joinTimeoutRef.current) { clearTimeout(joinTimeoutRef.current); joinTimeoutRef.current = null }
-    if (realtimeRef.current) { try { realtimeRef.current.close() } catch { /* ignore */ } realtimeRef.current = null }
-    if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
-    if (connRef.current) { connRef.current.close(); connRef.current = null }
-    if (peerRef.current) { peerRef.current.destroy(); peerRef.current = null }
-    if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
-    voteConnectionsRef.current = []
-    setConnected(false)
-  }
 
   useEffect(() => () => cleanupPeer(), [])
 
@@ -588,30 +612,6 @@ export default function PromptOffGame({ game }) {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     })
-  }
-
-  function resetGame() {
-    setPhase('waiting')
-    setTargetPrompt('')
-    setTimeLeft(GAME_DURATION)
-    setMyPromptText('')
-    setMyLiveUrl(null)
-    setOpponentLiveUrl(null)
-    setMyFinalUrl(null)
-    setMyFinalPrompt('')
-    setOpponentFinalUrl(null)
-    setOpponentFinalPrompt('')
-    setVoteRoomCode('')
-    setAudienceVotes({ A: 0, B: 0 })
-    setAudienceCount(0)
-    setVotingClosed(false)
-    audienceVotesRef.current = { A: 0, B: 0 }
-    votingClosedRef.current = false
-    votedPeerIdsRef.current = new Set()
-    endsAtRef.current = null
-    if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
-    voteConnectionsRef.current = []
-    scoredRef.current = false
   }
 
   function requestRematch() {

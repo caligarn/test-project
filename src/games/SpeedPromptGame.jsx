@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
 import { useGameRounds } from '../hooks/useGameRounds'
@@ -97,7 +97,12 @@ export default function SpeedPromptGame({ game }) {
     recordScore(pts)
     setPhase('result')
   }
-  submitRef.current = handleSubmit
+
+  // Keep the ref pointing at the latest handleSubmit so the timer's
+  // auto-submit never fires a stale closure with an old prompt.
+  useEffect(() => {
+    submitRef.current = handleSubmit
+  })
 
   const handleNextRound = () => {
     stopTimer()
