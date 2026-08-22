@@ -455,37 +455,37 @@ export default function PromptOffGame({ game }) {
     setAudienceCount(0)
     setVotingClosed(false)
     audienceVotesRef.current = { A: 0, B: 0 }
+    votingClosedRef.current = false
+    votedPeerIdsRef.current = new Set()
     voteConnectionsRef.current = []
 
     const votePeer = new Peer(`promptoff-vote-${code}`)
     votePeerRef.current = votePeer
 
     votePeer.on('connection', (conn) => {
-      voteConnectionsRef.current.push(conn)
-      setAudienceCount(prev => prev + 1)
-
       conn.on('open', () => {
-        // Send the vote data to the new viewer
-        conn.send({
-          type: 'vote-data',
-          prompt: targetPrompt,
-          imageA: myFinalUrl || myLiveUrl || '',
-          imageB: opponentFinalUrl || opponentLiveUrl || '',
-          labelA: username,
-          labelB: opponentName,
-        })
+        voteConnectionsRef.current.push(conn)
+        setAudienceCount(prev => prev + 1)
+        // Send the vote data to the new viewer — read refs so the data is never stale
+        conn.send(buildVoteData())
       })
 
       conn.on('data', (msg) => {
+        if (votingClosedRef.current) return
         if (msg.type === 'vote' && (msg.vote === 'A' || msg.vote === 'B')) {
+          if (votedPeerIdsRef.current.has(conn.peer)) return
+          votedPeerIdsRef.current.add(conn.peer)
           audienceVotesRef.current[msg.vote]++
           setAudienceVotes({ ...audienceVotesRef.current })
         }
       })
 
       conn.on('close', () => {
-        voteConnectionsRef.current = voteConnectionsRef.current.filter(c => c !== conn)
-        setAudienceCount(prev => Math.max(0, prev - 1))
+        const idx = voteConnectionsRef.current.indexOf(conn)
+        if (idx !== -1) {
+          voteConnectionsRef.current.splice(idx, 1)
+          setAudienceCount(prev => Math.max(0, prev - 1))
+        }
       })
     })
 
@@ -500,14 +500,34 @@ export default function PromptOffGame({ game }) {
     }
   }, [phase])
 
+  function buildVoteData() {
+    return {
+      type: 'vote-data',
+      prompt: targetPromptRef.current,
+      imageA: myFinalUrlRef.current || myLiveUrlRef.current || '',
+      imageB: opponentFinalUrlRef.current || opponentLiveUrlRef.current || '',
+      labelA: username,
+      labelB: opponentNameRef.current,
+    }
+  }
+
+  // If final URLs land after spectators connected, refresh their vote data
+  useEffect(() => {
+    if (phase !== 'voting' || !isHost) return
+    voteConnectionsRef.current.forEach(conn => {
+      if (conn.open) conn.send(buildVoteData())
+    })
+  }, [myFinalUrl, opponentFinalUrl, phase, isHost])
+
   function broadcastResults() {
-    const results = { votesA: audienceVotes.A, votesB: audienceVotes.B }
+    votingClosedRef.current = true
+    const results = { votesA: audienceVotesRef.current.A, votesB: audienceVotesRef.current.B }
     // Send to all audience viewers
     voteConnectionsRef.current.forEach(conn => {
       if (conn.open) conn.send({ type: 'vote-results', results })
     })
-    // Send to the opponent (guest) via game connection
-    send({ type: 'vote-results', votesA: audienceVotes.A, votesB: audienceVotes.B })
+    // Send to the opponent (guest) via game connection — same payload shape
+    send({ type: 'vote-results', results })
     setVotingClosed(true)
   }
 
@@ -530,13 +550,12 @@ export default function PromptOffGame({ game }) {
     const ctx = canvas.getContext('2d')
     ctx.beginPath()
     ctx.moveTo(pos.x, pos.y)
-    lastPointRef.current = pos
-    setIsDrawingActive(true)
+    isDrawingActiveRef.current = true
   }
 
   function handleDrawMove(e) {
     e.preventDefault()
-    if (!isDrawingActive) return
+    if (!isDrawingActiveRef.current) return
     const canvas = canvasRef.current
     if (!canvas) return
     const pos = getCanvasPos(e, canvas)
@@ -549,39 +568,19 @@ export default function PromptOffGame({ game }) {
     ctx.stroke()
     ctx.beginPath()
     ctx.moveTo(pos.x, pos.y)
-    lastPointRef.current = pos
+    hasDrawnRef.current = true
   }
 
   function handleDrawEnd(e) {
     if (e) e.preventDefault()
-    if (!isDrawingActive) return
-    setIsDrawingActive(false)
-    const canvas = canvasRef.current
-    if (canvas) {
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.4)
-      send({ type: 'canvas', data: dataUrl })
-      triggerRealtimeGeneration()
-    }
+    if (!isDrawingActiveRef.current) return
+    isDrawingActiveRef.current = false
+    if (canvasRef.current) triggerRealtimeGeneration()
   }
 
   function clearCanvas() {
     initCanvas(canvasRef.current)
-    const dataUrl = canvasRef.current.toDataURL('image/jpeg', 0.4)
-    send({ type: 'canvas', data: dataUrl })
     triggerRealtimeGeneration()
-  }
-
-  // ---------- VOTING ----------
-
-  function castVote(vote) {
-    setMyVote(vote)
-    send({ type: 'vote', vote })
-  }
-
-  function getWinner() {
-    if (!myVote || !opponentVote) return null
-    if (myVote === opponentVote) return myVote
-    return 'tie'
   }
 
   function copyCode() {
@@ -602,13 +601,14 @@ export default function PromptOffGame({ game }) {
     setMyFinalPrompt('')
     setOpponentFinalUrl(null)
     setOpponentFinalPrompt('')
-    setMyVote(null)
-    setOpponentVote(null)
     setVoteRoomCode('')
     setAudienceVotes({ A: 0, B: 0 })
     setAudienceCount(0)
     setVotingClosed(false)
     audienceVotesRef.current = { A: 0, B: 0 }
+    votingClosedRef.current = false
+    votedPeerIdsRef.current = new Set()
+    endsAtRef.current = null
     if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
     voteConnectionsRef.current = []
     scoredRef.current = false
@@ -618,11 +618,6 @@ export default function PromptOffGame({ game }) {
     send({ type: 'rematch' })
     resetGame()
   }
-
-  const myRole = isHost ? 'host' : 'guest'
-  const winner = getWinner()
-  const iWon = winner === myRole
-  const theyWon = winner && winner !== 'tie' && winner !== myRole
 
   // Score on audience vote result
   // A = host's image, B = guest's image
