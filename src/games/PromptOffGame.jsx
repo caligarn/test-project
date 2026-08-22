@@ -370,23 +370,22 @@ export default function PromptOffGame({ game }) {
         pendingGenerateRef.current = false
         triggerRealtimeGeneration()
       }
-    }, 600)
+    }, 400)
   }
 
-  // Re-trigger generation when prompt text changes — fast for real-time feel
+  // Re-trigger generation when prompt text changes — the internal 400ms debounce paces requests
   useEffect(() => {
     if (phase !== 'playing') return
     if (!myPromptText.trim()) return
-    const timeout = setTimeout(() => triggerRealtimeGeneration(), 400)
-    return () => clearTimeout(timeout)
+    triggerRealtimeGeneration()
   }, [myPromptText, phase])
 
   // ---------- TIME UP / SUBMIT ----------
 
-  async function handleTimeUp() {
+  async function submitFinal(promptText) {
+    if (timerRef.current) clearInterval(timerRef.current)
     if (realtimeRef.current) { try { realtimeRef.current.close() } catch {} realtimeRef.current = null }
     setPhase('generating')
-    const promptText = myPromptRef.current.trim() || 'abstract art'
     setMyFinalPrompt(promptText)
     try {
       const canvas = canvasRef.current
@@ -400,35 +399,19 @@ export default function PromptOffGame({ game }) {
       setMyFinalUrl(url)
       send({ type: 'final', url, prompt: promptText })
     } catch {
-      const fallback = myLiveUrl || ''
+      const fallback = myLiveUrlRef.current || ''
       setMyFinalUrl(fallback)
       send({ type: 'final', url: fallback, prompt: promptText })
     }
   }
 
+  async function handleTimeUp() {
+    await submitFinal(myPromptRef.current.trim() || 'abstract art')
+  }
+
   async function handleSubmitEarly() {
     if (!myPromptText.trim()) return
-    if (timerRef.current) clearInterval(timerRef.current)
-    if (realtimeRef.current) { try { realtimeRef.current.close() } catch {} realtimeRef.current = null }
-    setPhase('generating')
-    const promptText = myPromptText.trim()
-    setMyFinalPrompt(promptText)
-    try {
-      const canvas = canvasRef.current
-      const canvasData = canvas ? canvas.toDataURL('image/jpeg', 0.6) : null
-      let url
-      if (canvasData) {
-        url = await generateFromSketch(promptText, canvasData, { strength: 0.6 })
-      } else {
-        url = await generateImage(promptText)
-      }
-      setMyFinalUrl(url)
-      send({ type: 'final', url, prompt: promptText })
-    } catch {
-      const fallback = myLiveUrl || ''
-      setMyFinalUrl(fallback)
-      send({ type: 'final', url: fallback, prompt: promptText })
-    }
+    await submitFinal(myPromptText.trim())
   }
 
   // Move to voting when both finals are in, or after timeout
