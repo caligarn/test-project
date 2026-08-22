@@ -2,21 +2,34 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { addScore, getScores } from '../lib/storage'
 import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
+import StatsBar from '../components/game/StatsBar'
+import ErrorBanner from '../components/game/ErrorBanner'
+import GameImage from '../components/game/GameImage'
 
 const TILE_PX = 130
 const VISIBLE_COLS = 6
 const VISIBLE_ROWS = 4
+const MAX_CONCURRENT = 3
 
 function userStorageKey(username) {
   return `ai_arcade_infinimap_${username}`
 }
 
 function loadTiles(username) {
-  return JSON.parse(localStorage.getItem(userStorageKey(username)) || '{}')
+  try {
+    const parsed = JSON.parse(localStorage.getItem(userStorageKey(username)) || '{}')
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
 }
 
 function saveTiles(username, tiles) {
-  localStorage.setItem(userStorageKey(username), JSON.stringify(tiles))
+  try {
+    localStorage.setItem(userStorageKey(username), JSON.stringify(tiles))
+  } catch {
+    // Storage unavailable/full — keep the in-memory map so the session still works
+  }
 }
 
 function loadScore(username) {
@@ -42,7 +55,7 @@ function TileCell({ tile, onClick, loading, coordLabel }) {
     >
       {tile?.url ? (
         <>
-          <img
+          <GameImage
             src={tile.url}
             alt={tile.prompt}
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
@@ -76,11 +89,24 @@ export default function InfinimapGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
   const [tiles, setTiles] = useState(() => loadTiles(username))
-  const [loadingTile, setLoadingTile] = useState(null)
+  const [loadingKeys, setLoadingKeys] = useState(() => new Set())
   const [prompt, setPrompt] = useState('')
   const [pendingCoord, setPendingCoord] = useState(null)
   const [score, setScore] = useState(() => loadScore(username))
   const [error, setError] = useState(null)
+
+  const aliveRef = useRef(true)
+  useEffect(() => {
+    aliveRef.current = true
+    return () => { aliveRef.current = false }
+  }, [])
+
+  // Reload the map + score when the logged-in user changes, so one account's
+  // tiles never bleed into another's session.
+  useEffect(() => {
+    setTiles(loadTiles(username))
+    setScore(loadScore(username))
+  }, [username])
 
   // Camera: which tile coords are at the top-left of the viewport
   const [camera, setCamera] = useState({ col: 0, row: 0 })
@@ -97,6 +123,7 @@ export default function InfinimapGame({ game }) {
   useEffect(() => {
     const handler = (e) => {
       if (pendingCoord) return
+      if (e.target instanceof Element && e.target.matches('input, textarea, [contenteditable]')) return
       const step = e.shiftKey ? 3 : 1
       switch (e.key) {
         case 'ArrowUp':    case 'w': case 'W': setCamera(c => ({ ...c, row: c.row - step })); e.preventDefault(); break
@@ -112,6 +139,7 @@ export default function InfinimapGame({ game }) {
   // Pointer drag-to-pan
   const handlePointerDown = useCallback((e) => {
     if (e.target.closest('button, form, input')) return
+    e.currentTarget.setPointerCapture(e.pointerId)
     setDragging(true)
     hasDragged.current = false
     dragStart.current = { x: e.clientX, y: e.clientY }
@@ -139,9 +167,12 @@ export default function InfinimapGame({ game }) {
 
   const handleTileClick = (r, c) => {
     if (hasDragged.current) return
-    if (loadingTile) return
     const key = tileKey(r, c)
-    if (tiles[key]) return
+    if (tiles[key] || loadingKeys.has(key)) return
+    if (loadingKeys.size >= MAX_CONCURRENT) {
+      setError(`Up to ${MAX_CONCURRENT} tiles can generate at once — wait for one to finish.`)
+      return
+    }
     setPendingCoord({ r, c })
     setPrompt('')
     setError(null)
@@ -149,24 +180,40 @@ export default function InfinimapGame({ game }) {
 
   const handleGenerate = async (e) => {
     e.preventDefault()
-    if (!prompt.trim() || !pendingCoord) return
+    const tilePrompt = prompt.trim()
+    if (!tilePrompt || !pendingCoord) return
     const { r, c } = pendingCoord
     const key = tileKey(r, c)
+    if (loadingKeys.size >= MAX_CONCURRENT || loadingKeys.has(key)) return
     setPendingCoord(null)
-    setLoadingTile(key)
+    setLoadingKeys(prev => {
+      const next = new Set(prev)
+      next.add(key)
+      return next
+    })
     setError(null)
     try {
-      const url = await generateImage(prompt.trim(), { width: 512, height: 512 })
-      const updated = { ...tiles, [key]: { url, prompt: prompt.trim(), author: username } }
-      setTiles(updated)
-      saveTiles(username, updated)
+      const url = await generateImage(tilePrompt, { width: 512, height: 512 })
+      if (!aliveRef.current) return
+      setTiles(t => {
+        const updated = { ...t, [key]: { url, prompt: tilePrompt, author: username } }
+        saveTiles(username, updated)
+        return updated
+      })
       const pts = game.pointsPerAction || 50
       setScore(s => s + pts)
-      addScore(game.id, username, pts, { prompt: prompt.trim(), tile: key })
+      addScore(game.id, username, pts, { prompt: tilePrompt, tile: key })
     } catch {
-      setError('Generation failed — check your Fal.ai key.')
+      if (!aliveRef.current) return
+      setError('Image generation failed — please try again.')
     } finally {
-      setLoadingTile(null)
+      if (aliveRef.current) {
+        setLoadingKeys(prev => {
+          const next = new Set(prev)
+          next.delete(key)
+          return next
+        })
+      }
     }
   }
 
@@ -178,22 +225,15 @@ export default function InfinimapGame({ game }) {
   return (
     <div className="flex flex-col gap-4">
       {/* Stats */}
-      <div className="flex items-center justify-between brutalist-card p-4">
-        <div>
-          <p className="text-xs font-black text-navy/50 uppercase">Tiles Painted</p>
-          <p className="text-3xl font-black text-navy">{painted}</p>
-        </div>
-        <div className="text-center">
-          <p className="text-xs font-black text-navy/50 uppercase">Position</p>
-          <p className="text-sm font-black text-navy">{camera.col}, {camera.row}</p>
-        </div>
-        <div className="text-right">
-          <p className="text-xs font-black text-navy/50 uppercase">Score</p>
-          <p className="text-3xl font-black text-primary">{score}</p>
-        </div>
-      </div>
+      <StatsBar
+        stats={[
+          { label: 'Tiles Painted', value: painted },
+          { label: 'Position', value: `${camera.col}, ${camera.row}` },
+          { label: 'Score', value: score, color: '#FF2D55' },
+        ]}
+      />
 
-      {error && <div className="p-3 bg-red-50 border-2 border-red-400 text-red-700 text-sm font-medium">{error}</div>}
+      <ErrorBanner message={error} />
 
       {/* Navigation controls */}
       <div className="flex items-center justify-between">
@@ -222,7 +262,7 @@ export default function InfinimapGame({ game }) {
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
+        onPointerCancel={handlePointerUp}
         style={{
           overflow: 'hidden',
           border: '3px solid #1A1A2E',
@@ -247,7 +287,7 @@ export default function InfinimapGame({ game }) {
                 <TileCell
                   key={key}
                   tile={tiles[key]}
-                  loading={loadingTile === key}
+                  loading={loadingKeys.has(key)}
                   onClick={() => handleTileClick(r, c)}
                   coordLabel={`${c}, ${r}`}
                 />

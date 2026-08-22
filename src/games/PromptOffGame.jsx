@@ -164,6 +164,7 @@ export default function PromptOffGame({ game }) {
       case 'start':
         setTargetPrompt(msg.prompt)
         endsAtRef.current = msg.endsAt || (Date.now() + (COUNTDOWN_SECONDS + GAME_DURATION) * 1000)
+        setCountdownNum(COUNTDOWN_SECONDS)
         setPhase('countdown')
         break
       case 'live':
@@ -277,6 +278,7 @@ export default function PromptOffGame({ game }) {
     const endsAt = Date.now() + (COUNTDOWN_SECONDS + GAME_DURATION) * 1000
     endsAtRef.current = endsAt
     send({ type: 'start', prompt, endsAt })
+    setCountdownNum(COUNTDOWN_SECONDS)
     setPhase('countdown')
   }
 
@@ -284,7 +286,6 @@ export default function PromptOffGame({ game }) {
 
   useEffect(() => {
     if (phase !== 'countdown') return
-    setCountdownNum(COUNTDOWN_SECONDS)
     const interval = setInterval(() => {
       setCountdownNum(prev => {
         if (prev <= 1) { clearInterval(interval); setPhase('playing'); return 0 }
@@ -442,8 +443,8 @@ export default function PromptOffGame({ game }) {
   useEffect(() => {
     if (phase !== 'generating') return
     if (myFinalUrl !== null && opponentFinalUrl !== null) {
-      setPhase('voting')
-      return
+      const advance = setTimeout(() => setPhase('voting'), 0)
+      return () => clearTimeout(advance)
     }
     // Timeout: after 15s, move to voting with whatever we have
     const timeout = setTimeout(() => {
