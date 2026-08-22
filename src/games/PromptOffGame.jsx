@@ -535,17 +535,6 @@ export default function PromptOffGame({ game }) {
     }
   }, [phase])
 
-  function buildVoteData() {
-    return {
-      type: 'vote-data',
-      prompt: targetPromptRef.current,
-      imageA: myFinalUrlRef.current || myLiveUrlRef.current || '',
-      imageB: opponentFinalUrlRef.current || opponentLiveUrlRef.current || '',
-      labelA: username,
-      labelB: opponentNameRef.current,
-    }
-  }
-
   // If final URLs land after spectators connected, refresh their vote data
   useEffect(() => {
     if (phase !== 'voting' || !isHost) return
@@ -934,8 +923,6 @@ export default function PromptOffGame({ game }) {
   // VOTING — audience votes via QR code, players see results live
   if (phase === 'voting' || phase === 'judging') {
     const totalVotes = audienceVotes.A + audienceVotes.B
-    const pctA = totalVotes > 0 ? Math.round((audienceVotes.A / totalVotes) * 100) : 0
-    const pctB = totalVotes > 0 ? Math.round((audienceVotes.B / totalVotes) * 100) : 0
     // A = host, B = guest — map to "my" and "their" perspective
     const hostName = isHost ? username : opponentName
     const guestName = isHost ? opponentName : username

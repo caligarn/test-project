@@ -100,7 +100,7 @@ export default function BeforeAfterGame({ game }) {
 
     // Strip emoji prefix for prompt (Extended_Pictographic, not \p{Emoji},
     // which also matches digits and would mangle e.g. "3000 years...")
-    const clean = label.replace(/^[\p{Extended_Pictographic}️‍\s]+/u, '').trim() || label
+    const clean = label.replace(/^[\p{Extended_Pictographic}\uFE0F\u200D\s]+/u, '').trim() || label
     const afterPrompt = `${scene.prompt}, but transformed: ${clean}, dramatic transformation, detailed`
 
     try {
