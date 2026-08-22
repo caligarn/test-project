@@ -13,7 +13,9 @@ export function useRoundTimer(onExpire) {
   const [timeLeft, setTimeLeft] = useState(null)
   const intervalRef = useRef(null)
   const expireRef = useRef(onExpire)
-  expireRef.current = onExpire
+  useEffect(() => {
+    expireRef.current = onExpire
+  })
 
   const stop = useCallback(() => {
     if (intervalRef.current) {

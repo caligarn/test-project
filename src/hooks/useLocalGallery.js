@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 
 /**
  * localStorage-backed list shared by the gallery games.
@@ -22,7 +22,9 @@ export function useLocalGallery(storageKey, { cap = 50, mode = 'prepend' } = {})
     }
   })
   const itemsRef = useRef(items)
-  itemsRef.current = items
+  useEffect(() => {
+    itemsRef.current = items
+  })
 
   const persist = useCallback(
     (updated) => {
