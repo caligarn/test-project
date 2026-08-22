@@ -1,7 +1,13 @@
-import { useState, useCallback } from 'react'
-import { addScore } from '../lib/storage'
+import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
+import { useGameRounds } from '../hooks/useGameRounds'
+import { promptSimilarityDetail, pickRandom, shuffle } from '../lib/similarity'
+import StatsBar from '../components/game/StatsBar'
+import GameOverCard from '../components/game/GameOverCard'
+import GeneratingSpinner from '../components/game/GeneratingSpinner'
+import ErrorBanner from '../components/game/ErrorBanner'
+import GameImage from '../components/game/GameImage'
 
 const PROMPTS = [
   'A cat wearing a tiny top hat sitting on a throne',
@@ -26,34 +32,13 @@ const PROMPTS = [
   'A hummingbird made of stained glass in a cathedral',
 ]
 
-function scoreSimilarity(guess, original) {
-  const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean)
-  const guessWords = normalize(guess)
-  const origWords = normalize(original)
-  if (guessWords.length === 0) return 0
-
-  const origSet = new Set(origWords)
-  let matches = 0
-  for (const w of guessWords) {
-    if (origSet.has(w)) matches++
-    else {
-      for (const ow of origWords) {
-        if (ow.includes(w) || w.includes(ow)) { matches += 0.5; break }
-      }
-    }
-  }
-
-  const precision = matches / guessWords.length
-  const recall = matches / origWords.length
-  const f1 = precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0
-  return Math.round(f1 * 100)
-}
+const MAX_ROUNDS = 5
 
 export default function PromptGuesserGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
-  const [round, setRound] = useState(1)
-  const [totalScore, setTotalScore] = useState(0)
+  const { round, totalScore, gameOver, token, isStale, recordScore, nextRound, restart } =
+    useGameRounds({ gameId: game.id, username, maxRounds: MAX_ROUNDS })
   const [imageUrl, setImageUrl] = useState(null)
   const [hiddenPrompt, setHiddenPrompt] = useState(null)
   const [guess, setGuess] = useState('')
@@ -64,14 +49,6 @@ export default function PromptGuesserGame({ game }) {
   const [hint, setHint] = useState('')
   const [usedPrompts, setUsedPrompts] = useState([])
 
-  const maxRounds = 5
-
-  const pickPrompt = useCallback(() => {
-    const available = PROMPTS.filter(p => !usedPrompts.includes(p))
-    const pool = available.length > 0 ? available : PROMPTS
-    return pool[Math.floor(Math.random() * pool.length)]
-  }, [usedPrompts])
-
   const startRound = async () => {
     setGenerating(true)
     setResult(null)
@@ -79,96 +56,92 @@ export default function PromptGuesserGame({ game }) {
     setHint('')
     setHintUsed(false)
     setError(null)
-    const prompt = pickPrompt()
+    const prompt = pickRandom(PROMPTS, usedPrompts)
     setHiddenPrompt(prompt)
     setUsedPrompts(prev => [...prev, prompt])
+    const t = token()
     try {
       const url = await generateImage(prompt)
+      if (isStale(t)) return
       setImageUrl(url)
     } catch {
+      if (isStale(t)) return
       setError('Image generation failed — check your API key.')
     } finally {
-      setGenerating(false)
+      if (!isStale(t)) setGenerating(false)
     }
   }
 
   const handleGuess = (e) => {
     e.preventDefault()
     if (!guess.trim() || !hiddenPrompt) return
-    const similarity = scoreSimilarity(guess, hiddenPrompt)
+    const { score, matchedWords } = promptSimilarityDetail(guess, hiddenPrompt)
     const hintPenalty = hintUsed ? 0.5 : 1
-    const pts = Math.round(similarity * hintPenalty)
-    setResult({ similarity, pts })
-    setTotalScore(s => s + pts)
-    addScore(game.id, username, pts, { guess, actual: hiddenPrompt, similarity })
+    const pts = Math.round(score * hintPenalty)
+    setResult({ similarity: score, matchedWords, pts })
+    recordScore(pts)
   }
 
   const showHint = () => {
     if (hintUsed || !hiddenPrompt) return
     const words = hiddenPrompt.split(' ')
-    const revealCount = Math.max(1, Math.floor(words.length * 0.3))
-    const indices = []
-    while (indices.length < revealCount) {
-      const i = Math.floor(Math.random() * words.length)
-      if (!indices.includes(i)) indices.push(i)
-    }
-    const hintWords = words.map((w, i) => indices.includes(i) ? w : '____')
+    // Only reveal content words (4+ characters), never filler like "a" or "the"
+    const contentIndices = words
+      .map((w, i) => (w.replace(/[^a-zA-Z0-9]/g, '').length >= 4 ? i : -1))
+      .filter(i => i !== -1)
+    const revealCount = Math.max(1, Math.floor(contentIndices.length * 0.3))
+    const revealed = new Set(shuffle(contentIndices).slice(0, revealCount))
+    const hintWords = words.map((w, i) => (revealed.has(i) ? w : '____'))
     setHint(hintWords.join(' '))
     setHintUsed(true)
   }
 
-  const nextRound = () => {
-    if (round >= maxRounds) {
-      setResult({ ...result, gameOver: true })
-      return
-    }
-    setRound(r => r + 1)
+  const handleNextRound = () => {
+    nextRound()
     setImageUrl(null)
     setHiddenPrompt(null)
     setResult(null)
   }
 
-  const restart = () => {
-    setRound(1)
-    setTotalScore(0)
+  const handleRestart = () => {
+    restart()
     setImageUrl(null)
     setHiddenPrompt(null)
+    setGuess('')
+    setGenerating(false)
     setResult(null)
-    setUsedPrompts([])
     setError(null)
+    setHintUsed(false)
+    setHint('')
+    setUsedPrompts([])
   }
 
   // Game over screen
-  if (result?.gameOver) {
+  if (gameOver) {
     return (
       <div className="flex flex-col gap-4">
-        <div className="brutalist-card p-8 text-center">
-          <p className="text-5xl mb-4">🏆</p>
-          <h3 className="text-2xl font-black text-navy uppercase mb-2">Game Over!</h3>
-          <p className="text-4xl font-black text-primary mb-2">{totalScore} pts</p>
-          <p className="text-navy/50 text-sm font-medium mb-6">across {maxRounds} rounds</p>
-          <button onClick={restart}
-            className="px-8 py-3 bg-primary text-white font-black uppercase text-sm"
-            style={{ border: '2px solid #1A1A2E' }}>
-            Play Again
-          </button>
-        </div>
+        <GameOverCard
+          emoji="🏆"
+          title="Game Over!"
+          score={`${totalScore} pts`}
+          subtitle={`across ${MAX_ROUNDS} rounds`}
+          onRestart={handleRestart}
+        />
       </div>
     )
   }
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Stats */}
-      <div className="flex items-center justify-between brutalist-card p-4">
-        <div><p className="text-xs font-black text-navy/50 uppercase">Round</p><p className="text-3xl font-black text-navy">{round}/{maxRounds}</p></div>
-        <div className="text-center"><p className="text-xs font-black text-navy/50 uppercase">Accuracy</p>
-          <p className="text-3xl font-black text-navy">{result ? `${result.similarity}%` : '—'}</p>
-        </div>
-        <div className="text-right"><p className="text-xs font-black text-navy/50 uppercase">Score</p><p className="text-3xl font-black text-primary">{totalScore}</p></div>
-      </div>
+      <StatsBar
+        stats={[
+          { label: 'Round', value: `${round}/${MAX_ROUNDS}` },
+          { label: 'Accuracy', value: result ? `${result.similarity}%` : '—' },
+          { label: 'Score', value: totalScore, color: '#FF2D55' },
+        ]}
+      />
 
-      {error && <div className="p-3 bg-red-50 border-2 border-red-400 text-red-700 text-sm font-medium">{error}</div>}
+      <ErrorBanner message={error} />
 
       {/* No image yet — start round */}
       {!imageUrl && !generating && (
@@ -186,17 +159,14 @@ export default function PromptGuesserGame({ game }) {
 
       {/* Generating */}
       {generating && (
-        <div className="brutalist-card p-12 text-center">
-          <div className="animate-spin rounded-full mx-auto mb-4" style={{ width: 40, height: 40, border: '4px solid #1A1A2E', borderTopColor: 'transparent' }} />
-          <p className="font-black text-navy uppercase">Generating mystery image...</p>
-        </div>
+        <GeneratingSpinner label="Generating mystery image..." color="#1A1A2E" />
       )}
 
       {/* Image shown — guessing phase */}
-      {imageUrl && !result && (
+      {imageUrl && !generating && !result && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
-            <img src={imageUrl} alt="Mystery" className="w-full object-cover" style={{ maxHeight: 400 }} />
+            <GameImage src={imageUrl} alt="Mystery" className="w-full object-cover" style={{ maxHeight: 400 }} eager />
           </div>
           <div className="brutalist-card p-6 flex flex-col gap-4">
             <h3 className="font-black text-navy uppercase text-sm">What prompt created this?</h3>
@@ -236,16 +206,21 @@ export default function PromptGuesserGame({ game }) {
       )}
 
       {/* Result shown */}
-      {result && !result.gameOver && (
+      {result && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
-            <img src={imageUrl} alt="Mystery" className="w-full object-cover" style={{ maxHeight: 400 }} />
+            <GameImage src={imageUrl} alt="Mystery" className="w-full object-cover" style={{ maxHeight: 400 }} eager />
           </div>
           <div className="brutalist-card p-6 flex flex-col gap-4">
             <div className="text-center">
               <p className="text-4xl mb-2">{result.similarity >= 60 ? '🎯' : result.similarity >= 30 ? '👍' : '😅'}</p>
               <p className="text-3xl font-black text-primary">+{result.pts} pts</p>
               <p className="text-sm font-black text-navy/50 uppercase">{result.similarity}% match</p>
+              {result.matchedWords.length > 0 && (
+                <p className="text-xs text-navy/50 font-medium mt-1">
+                  Matched: {result.matchedWords.join(', ')}
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <div>
@@ -257,10 +232,10 @@ export default function PromptGuesserGame({ game }) {
                 <p className="text-sm text-primary font-bold">{hiddenPrompt}</p>
               </div>
             </div>
-            <button onClick={nextRound}
+            <button onClick={handleNextRound}
               className="w-full py-3 bg-navy text-white font-black uppercase text-sm"
               style={{ border: '2px solid #1A1A2E' }}>
-              {round >= maxRounds ? 'See Final Score' : 'Next Round →'}
+              {round >= MAX_ROUNDS ? 'See Final Score' : 'Next Round →'}
             </button>
           </div>
         </div>

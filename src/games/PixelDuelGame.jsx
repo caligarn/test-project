@@ -1,7 +1,13 @@
-import { useState, useCallback } from 'react'
-import { addScore } from '../lib/storage'
+import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
+import { useGameRounds } from '../hooks/useGameRounds'
+import { promptSimilarity, pickRandom } from '../lib/similarity'
+import StatsBar from '../components/game/StatsBar'
+import GameOverCard from '../components/game/GameOverCard'
+import GeneratingSpinner from '../components/game/GeneratingSpinner'
+import ErrorBanner from '../components/game/ErrorBanner'
+import GameImage from '../components/game/GameImage'
 
 const CHALLENGES = [
   'A majestic snow-covered mountain peak at sunrise with pink clouds',
@@ -21,46 +27,21 @@ const CHALLENGES = [
   'A retro diner with chrome finishes and neon signs at dusk',
 ]
 
-function promptSimilarity(playerPrompt, targetPrompt) {
-  const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean)
-  const playerWords = new Set(normalize(playerPrompt))
-  const targetWords = normalize(targetPrompt)
-  const targetSet = new Set(targetWords)
-
-  let semanticScore = 0
-  for (const w of playerWords) {
-    if (targetSet.has(w)) semanticScore += 2
-    else {
-      for (const tw of targetWords) {
-        if (tw.includes(w) || w.includes(tw)) { semanticScore += 1; break }
-      }
-    }
-  }
-  const maxPossible = targetWords.length * 2
-  return Math.min(100, Math.round((semanticScore / maxPossible) * 100))
-}
+const MAX_ROUNDS = 5
 
 export default function PixelDuelGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
-  const [round, setRound] = useState(1)
-  const [totalScore, setTotalScore] = useState(0)
+  const { round, totalScore, gameOver, token, isStale, recordScore, nextRound, restart } =
+    useGameRounds({ gameId: game.id, username, maxRounds: MAX_ROUNDS })
   const [targetUrl, setTargetUrl] = useState(null)
   const [playerUrl, setPlayerUrl] = useState(null)
   const [targetPrompt, setTargetPrompt] = useState(null)
   const [playerPrompt, setPlayerPrompt] = useState('')
-  const [phase, setPhase] = useState('idle') // idle, loading-target, guessing, loading-player, result, gameover
+  const [phase, setPhase] = useState('idle') // idle, loading-target, guessing, loading-player, result
   const [error, setError] = useState(null)
   const [result, setResult] = useState(null)
   const [usedChallenges, setUsedChallenges] = useState([])
-
-  const maxRounds = 5
-
-  const pickChallenge = useCallback(() => {
-    const available = CHALLENGES.filter(c => !usedChallenges.includes(c))
-    const pool = available.length > 0 ? available : CHALLENGES
-    return pool[Math.floor(Math.random() * pool.length)]
-  }, [usedChallenges])
 
   const startRound = async () => {
     setPhase('loading-target')
@@ -68,14 +49,17 @@ export default function PixelDuelGame({ game }) {
     setPlayerUrl(null)
     setPlayerPrompt('')
     setResult(null)
-    const prompt = pickChallenge()
+    const prompt = pickRandom(CHALLENGES, usedChallenges)
     setTargetPrompt(prompt)
     setUsedChallenges(prev => [...prev, prompt])
+    const t = token()
     try {
       const url = await generateImage(prompt)
+      if (isStale(t)) return
       setTargetUrl(url)
       setPhase('guessing')
     } catch {
+      if (isStale(t)) return
       setError('Failed to generate target image.')
       setPhase('idle')
     }
@@ -86,72 +70,69 @@ export default function PixelDuelGame({ game }) {
     if (!playerPrompt.trim()) return
     setPhase('loading-player')
     setError(null)
+    const t = token()
     try {
       const url = await generateImage(playerPrompt.trim())
+      if (isStale(t)) return
       setPlayerUrl(url)
       const similarity = promptSimilarity(playerPrompt, targetPrompt)
-      const pts = Math.round(similarity * 1.5)
+      const pts = Math.min(150, Math.round(similarity * 1.5))
       setResult({ similarity, pts })
-      setTotalScore(s => s + pts)
-      addScore(game.id, username, pts, { playerPrompt, targetPrompt, similarity })
+      recordScore(pts)
       setPhase('result')
     } catch {
+      if (isStale(t)) return
       setError('Failed to generate your image.')
       setPhase('guessing')
     }
   }
 
-  const nextRound = () => {
-    if (round >= maxRounds) {
-      setPhase('gameover')
-      return
-    }
-    setRound(r => r + 1)
+  const handleNextRound = () => {
+    nextRound()
     setTargetUrl(null)
+    setPlayerUrl(null)
+    setResult(null)
     setPhase('idle')
   }
 
-  const restart = () => {
-    setRound(1)
-    setTotalScore(0)
+  const handleRestart = () => {
+    restart()
     setTargetUrl(null)
     setPlayerUrl(null)
     setTargetPrompt(null)
+    setPlayerPrompt('')
     setResult(null)
+    setError(null)
     setUsedChallenges([])
     setPhase('idle')
   }
 
-  if (phase === 'gameover') {
+  if (gameOver) {
     return (
       <div className="flex flex-col gap-4">
-        <div className="brutalist-card p-8 text-center">
-          <p className="text-5xl mb-4">⚔️</p>
-          <h3 className="text-2xl font-black text-navy uppercase mb-2">Duel Complete!</h3>
-          <p className="text-4xl font-black text-primary mb-2">{totalScore} pts</p>
-          <p className="text-navy/50 text-sm font-medium mb-6">across {maxRounds} rounds</p>
-          <button onClick={restart}
-            className="px-8 py-3 bg-primary text-white font-black uppercase text-sm"
-            style={{ border: '2px solid #1A1A2E' }}>
-            Duel Again
-          </button>
-        </div>
+        <GameOverCard
+          emoji="⚔️"
+          title="Duel Complete!"
+          score={`${totalScore} pts`}
+          subtitle={`across ${MAX_ROUNDS} rounds`}
+          onRestart={handleRestart}
+          restartLabel="Duel Again"
+        />
       </div>
     )
   }
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Stats */}
-      <div className="flex items-center justify-between brutalist-card p-4">
-        <div><p className="text-xs font-black text-navy/50 uppercase">Round</p><p className="text-3xl font-black text-navy">{round}/{maxRounds}</p></div>
-        <div className="text-center"><p className="text-xs font-black text-navy/50 uppercase">Similarity</p>
-          <p className="text-3xl font-black text-navy">{result ? `${result.similarity}%` : '—'}</p>
-        </div>
-        <div className="text-right"><p className="text-xs font-black text-navy/50 uppercase">Score</p><p className="text-3xl font-black text-primary">{totalScore}</p></div>
-      </div>
+      <StatsBar
+        stats={[
+          { label: 'Round', value: `${round}/${MAX_ROUNDS}` },
+          { label: 'Prompt Match', value: result ? `${result.similarity}%` : '—' },
+          { label: 'Score', value: totalScore, color: '#FF2D55' },
+        ]}
+      />
 
-      {error && <div className="p-3 bg-red-50 border-2 border-red-400 text-red-700 text-sm font-medium">{error}</div>}
+      <ErrorBanner message={error} />
 
       {phase === 'idle' && (
         <div className="brutalist-card p-12 text-center">
@@ -167,10 +148,7 @@ export default function PixelDuelGame({ game }) {
       )}
 
       {phase === 'loading-target' && (
-        <div className="brutalist-card p-12 text-center">
-          <div className="animate-spin rounded-full mx-auto mb-4" style={{ width: 40, height: 40, border: '4px solid #1A1A2E', borderTopColor: 'transparent' }} />
-          <p className="font-black text-navy uppercase">Generating target image...</p>
-        </div>
+        <GeneratingSpinner label="Generating target image..." color="#1A1A2E" />
       )}
 
       {phase === 'guessing' && (
@@ -178,7 +156,7 @@ export default function PixelDuelGame({ game }) {
           <div>
             <p className="text-xs font-black text-navy/50 uppercase mb-2">Target — Recreate This</p>
             <div style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
-              <img src={targetUrl} alt="Target" className="w-full object-cover" style={{ maxHeight: 400 }} />
+              <GameImage src={targetUrl} alt="Target" className="w-full object-cover" style={{ maxHeight: 400 }} eager />
             </div>
           </div>
           <div className="brutalist-card p-6 flex flex-col gap-4">
@@ -209,15 +187,10 @@ export default function PixelDuelGame({ game }) {
           <div>
             <p className="text-xs font-black text-navy/50 uppercase mb-2">Target</p>
             <div style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
-              <img src={targetUrl} alt="Target" className="w-full object-cover" style={{ maxHeight: 400 }} />
+              <GameImage src={targetUrl} alt="Target" className="w-full object-cover" style={{ maxHeight: 400 }} eager />
             </div>
           </div>
-          <div className="brutalist-card p-12 text-center flex items-center justify-center">
-            <div>
-              <div className="animate-spin rounded-full mx-auto mb-4" style={{ width: 40, height: 40, border: '4px solid #1A1A2E', borderTopColor: 'transparent' }} />
-              <p className="font-black text-navy uppercase text-sm">Generating your image...</p>
-            </div>
-          </div>
+          <GeneratingSpinner label="Generating your image..." color="#1A1A2E" />
         </div>
       )}
 
@@ -227,28 +200,28 @@ export default function PixelDuelGame({ game }) {
             <div>
               <p className="text-xs font-black text-navy/50 uppercase mb-2">Target</p>
               <div style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
-                <img src={targetUrl} alt="Target" className="w-full object-cover" style={{ maxHeight: 350 }} />
+                <GameImage src={targetUrl} alt="Target" className="w-full object-cover" style={{ maxHeight: 350 }} eager />
               </div>
             </div>
             <div>
               <p className="text-xs font-black text-navy/50 uppercase mb-2">Your Recreation</p>
               <div style={{ border: '3px solid #C8FF00', overflow: 'hidden' }}>
-                <img src={playerUrl} alt="Player" className="w-full object-cover" style={{ maxHeight: 350 }} />
+                <GameImage src={playerUrl} alt="Player" className="w-full object-cover" style={{ maxHeight: 350 }} eager />
               </div>
             </div>
           </div>
           <div className="brutalist-card p-6 text-center">
             <p className="text-4xl mb-2">{result.similarity >= 60 ? '🎯' : result.similarity >= 30 ? '⚔️' : '💪'}</p>
             <p className="text-3xl font-black text-primary mb-1">+{result.pts} pts</p>
-            <p className="text-sm font-black text-navy/50 uppercase mb-3">{result.similarity}% prompt similarity</p>
+            <p className="text-sm font-black text-navy/50 uppercase mb-3">{result.similarity}% prompt match</p>
             <div className="text-left max-w-md mx-auto space-y-1 mb-4">
               <p className="text-xs font-black text-navy/50 uppercase">Original prompt</p>
               <p className="text-sm text-navy font-medium">{targetPrompt}</p>
             </div>
-            <button onClick={nextRound}
+            <button onClick={handleNextRound}
               className="px-8 py-3 bg-navy text-white font-black uppercase text-sm"
               style={{ border: '2px solid #1A1A2E' }}>
-              {round >= maxRounds ? 'See Final Score' : 'Next Round →'}
+              {round >= MAX_ROUNDS ? 'See Final Score' : 'Next Round →'}
             </button>
           </div>
         </>

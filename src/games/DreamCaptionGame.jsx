@@ -1,7 +1,12 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { addScore } from '../lib/storage'
 import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
+import { useLocalGallery } from '../hooks/useLocalGallery'
+import StatsBar from '../components/game/StatsBar'
+import ErrorBanner from '../components/game/ErrorBanner'
+import GeneratingSpinner from '../components/game/GeneratingSpinner'
+import GameImage from '../components/game/GameImage'
 
 const DREAM_PROMPTS = [
   'A staircase made of books leading to a door in the clouds',
@@ -25,29 +30,55 @@ const DREAM_PROMPTS = [
 ]
 
 const STORAGE_KEY = 'ai_arcade_dream_captions'
+const VOTES_KEY = 'ai_arcade_votes_dreamcaption'
+
+function loadVotedIds() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(VOTES_KEY) || '[]')
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function saveVotedIds(ids) {
+  try {
+    localStorage.setItem(VOTES_KEY, JSON.stringify(ids))
+  } catch {
+    // Storage unavailable — votes just won't persist
+  }
+}
 
 export default function DreamCaptionGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
-  const [gallery, setGallery] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
+  const { items: gallery, add: addToGallery, update: updateEntry } = useLocalGallery(STORAGE_KEY, { cap: 50, mode: 'prepend' })
   const [imageUrl, setImageUrl] = useState(null)
-  const [dreamPrompt, setDreamPrompt] = useState(null)
   const [caption, setCaption] = useState('')
   const [phase, setPhase] = useState('idle') // idle, generating, captioning, submitted
   const [error, setError] = useState(null)
   const [score, setScore] = useState(0)
+  const [submitted, setSubmitted] = useState(null)
+  const [votedIds, setVotedIds] = useState(loadVotedIds)
+
+  const aliveRef = useRef(true)
+  useEffect(() => {
+    aliveRef.current = true
+    return () => { aliveRef.current = false }
+  }, [])
 
   const generateDream = async () => {
     setPhase('generating')
     setError(null)
     setCaption('')
     const prompt = DREAM_PROMPTS[Math.floor(Math.random() * DREAM_PROMPTS.length)]
-    setDreamPrompt(prompt)
     try {
       const url = await generateImage(`Surreal dreamlike artwork: ${prompt}. Ethereal, mystical, impossible, dreamscape.`)
+      if (!aliveRef.current) return
       setImageUrl(url)
       setPhase('captioning')
     } catch {
+      if (!aliveRef.current) return
       setError('Image generation failed.')
       setPhase('idle')
     }
@@ -65,7 +96,7 @@ export default function DreamCaptionGame({ game }) {
     const pts = lengthScore + punctuationBonus + poeticBonus + 25 // base 25
 
     const entry = {
-      id: Date.now(),
+      id: crypto.randomUUID(),
       imageUrl,
       caption: caption.trim(),
       author: username,
@@ -73,39 +104,40 @@ export default function DreamCaptionGame({ game }) {
       pts,
     }
 
-    const updated = [entry, ...gallery].slice(0, 50)
-    setGallery(updated)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+    addToGallery(entry)
+    setSubmitted(entry)
     setScore(s => s + pts)
     addScore(game.id, username, pts, { caption: caption.trim() })
     setPhase('submitted')
   }
 
   const handleVote = (entryId) => {
-    const updated = gallery.map(g =>
-      g.id === entryId ? { ...g, votes: (g.votes || 0) + 1 } : g
-    )
-    setGallery(updated)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+    const hasVoted = votedIds.includes(entryId)
+    updateEntry(entryId, g => ({ ...g, votes: Math.max(0, (g.votes || 0) + (hasVoted ? -1 : 1)) }))
+    const updatedIds = hasVoted ? votedIds.filter(id => id !== entryId) : [...votedIds, entryId]
+    setVotedIds(updatedIds)
+    saveVotedIds(updatedIds)
   }
 
   const newDream = () => {
     setImageUrl(null)
-    setDreamPrompt(null)
     setCaption('')
+    setSubmitted(null)
     setPhase('idle')
   }
 
   return (
     <div className="flex flex-col gap-4">
       {/* Stats */}
-      <div className="flex items-center justify-between brutalist-card p-4">
-        <div><p className="text-xs font-black text-navy/50 uppercase">Your Captions</p><p className="text-3xl font-black text-navy">{gallery.filter(g => g.author === username).length}</p></div>
-        <div className="text-center"><p className="text-xs font-black text-navy/50 uppercase">Gallery</p><p className="text-3xl font-black text-navy">{gallery.length}</p></div>
-        <div className="text-right"><p className="text-xs font-black text-navy/50 uppercase">Score</p><p className="text-3xl font-black text-primary">{score}</p></div>
-      </div>
+      <StatsBar
+        stats={[
+          { label: 'Your Captions', value: gallery.filter(g => g.author === username).length },
+          { label: 'Gallery', value: gallery.length },
+          { label: 'Score', value: score, color: '#FF2D55' },
+        ]}
+      />
 
-      {error && <div className="p-3 bg-red-50 border-2 border-red-400 text-red-700 text-sm font-medium">{error}</div>}
+      <ErrorBanner message={error} />
 
       {phase === 'idle' && (
         <div className="brutalist-card p-12 text-center">
@@ -121,16 +153,13 @@ export default function DreamCaptionGame({ game }) {
       )}
 
       {phase === 'generating' && (
-        <div className="brutalist-card p-12 text-center">
-          <div className="animate-spin rounded-full mx-auto mb-4" style={{ width: 40, height: 40, border: '4px solid #8B5CF6', borderTopColor: 'transparent' }} />
-          <p className="font-black text-navy uppercase">Dreaming up something surreal...</p>
-        </div>
+        <GeneratingSpinner label="Dreaming up something surreal..." color="#8B5CF6" />
       )}
 
       {(phase === 'captioning' || phase === 'submitted') && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
-            <img src={imageUrl} alt="Dream" className="w-full object-cover" style={{ maxHeight: 400 }} />
+            <GameImage eager src={imageUrl} alt="Dream" className="w-full object-cover" style={{ maxHeight: 400 }} />
           </div>
           <div className="brutalist-card p-6 flex flex-col gap-4">
             {phase === 'captioning' ? (
@@ -157,8 +186,8 @@ export default function DreamCaptionGame({ game }) {
             ) : (
               <div className="text-center flex flex-col justify-center flex-1 gap-3">
                 <p className="text-4xl">✨</p>
-                <p className="text-3xl font-black text-primary">+{gallery[0]?.pts || 0} pts</p>
-                <p className="text-sm text-navy italic">"{gallery[0]?.caption}"</p>
+                <p className="text-3xl font-black text-primary">+{submitted?.pts || 0} pts</p>
+                <p className="text-sm text-navy italic">"{submitted?.caption}"</p>
                 <button onClick={newDream}
                   className="mt-4 w-full py-3 bg-[#8B5CF6] text-white font-black uppercase text-sm"
                   style={{ border: '2px solid #1A1A2E' }}>
@@ -177,13 +206,14 @@ export default function DreamCaptionGame({ game }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {gallery.slice(0, 8).map(entry => (
               <div key={entry.id} className="brutalist-card p-0 overflow-hidden flex" style={{ height: 140 }}>
-                <img src={entry.imageUrl} alt="" className="w-28 h-full object-cover flex-none" />
+                <GameImage src={entry.imageUrl} alt="" className="w-28 h-full object-cover flex-none" />
                 <div className="p-3 flex flex-col justify-between flex-1 min-w-0">
                   <p className="text-xs text-navy italic leading-tight line-clamp-3">"{entry.caption}"</p>
                   <div className="flex items-center justify-between mt-1">
                     <span className="text-[10px] text-navy/40 font-bold">— {entry.author}</span>
                     <button onClick={() => handleVote(entry.id)}
-                      className="text-xs font-black text-navy/50 hover:text-primary transition-colors">
+                      title={votedIds.includes(entry.id) ? 'Remove your vote' : 'Vote for this caption'}
+                      className={`text-xs font-black transition-colors ${votedIds.includes(entry.id) ? 'text-primary' : 'text-navy/50 hover:text-primary'}`}>
                       ♥ {entry.votes || 0}
                     </button>
                   </div>

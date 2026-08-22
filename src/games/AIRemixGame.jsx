@@ -1,7 +1,11 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { addScore } from '../lib/storage'
 import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
+import { useLocalGallery } from '../hooks/useLocalGallery'
+import ErrorBanner from '../components/game/ErrorBanner'
+import GeneratingSpinner from '../components/game/GeneratingSpinner'
+import GameImage from '../components/game/GameImage'
 
 const STARTER_PROMPTS = [
   'A simple red house on a green hill',
@@ -24,8 +28,14 @@ export default function AIRemixGame({ game }) {
   const [phase, setPhase] = useState('start') // start, remixing, generating, viewing
   const [error, setError] = useState(null)
   const [score, setScore] = useState(0)
-  const [savedChains, setSavedChains] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
+  const { items: savedChains, add: addSavedChain } = useLocalGallery(STORAGE_KEY, { cap: 20, mode: 'prepend' })
   const [generating, setGenerating] = useState(false)
+
+  const aliveRef = useRef(true)
+  useEffect(() => {
+    aliveRef.current = true
+    return () => { aliveRef.current = false }
+  }, [])
 
   const maxSteps = 6
 
@@ -35,14 +45,16 @@ export default function AIRemixGame({ game }) {
     setError(null)
     try {
       const url = await generateImage(starterPrompt)
+      if (!aliveRef.current) return
       setChain([{ prompt: starterPrompt, url, step: 1 }])
       setCurrentPrompt('')
       setPhase('remixing')
     } catch {
+      if (!aliveRef.current) return
       setError('Image generation failed.')
       setPhase('start')
     } finally {
-      setGenerating(false)
+      if (aliveRef.current) setGenerating(false)
     }
   }
 
@@ -58,34 +70,36 @@ export default function AIRemixGame({ game }) {
     setError(null)
     try {
       const url = await generateImage(remixPrompt)
+      if (!aliveRef.current) return
       const newStep = { prompt: currentPrompt.trim(), fullPrompt: remixPrompt, url, step: chain.length + 1 }
       const updated = [...chain, newStep]
       setChain(updated)
       setCurrentPrompt('')
 
       const pts = 50 + (chain.length * 10) // increasing points per step
-      setScore(s => s + pts)
-      addScore(game.id, username, pts, { step: updated.length, prompt: currentPrompt.trim() })
+      const newScore = score + pts
+      setScore(newScore)
 
       if (updated.length >= maxSteps) {
+        // Chain complete — award the accumulated total in a single play
+        addScore(game.id, username, newScore, { steps: updated.length })
         // Save chain
         const chainEntry = {
-          id: Date.now(),
+          id: crypto.randomUUID(),
           steps: updated,
           author: username,
         }
-        const updatedChains = [chainEntry, ...savedChains].slice(0, 20)
-        setSavedChains(updatedChains)
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedChains))
+        addSavedChain(chainEntry)
         setPhase('viewing')
       } else {
         setPhase('remixing')
       }
     } catch {
+      if (!aliveRef.current) return
       setError('Remix generation failed.')
       setPhase('remixing')
     } finally {
-      setGenerating(false)
+      if (aliveRef.current) setGenerating(false)
     }
   }
 
@@ -116,7 +130,7 @@ export default function AIRemixGame({ game }) {
         <div className="text-right"><p className="text-xs font-black text-navy/50 uppercase">Score</p><p className="text-3xl font-black text-primary">{score}</p></div>
       </div>
 
-      {error && <div className="p-3 bg-red-50 border-2 border-red-400 text-red-700 text-sm font-medium">{error}</div>}
+      <ErrorBanner message={error} />
 
       {phase === 'start' && (
         <div className="brutalist-card p-6">
@@ -138,12 +152,10 @@ export default function AIRemixGame({ game }) {
       )}
 
       {phase === 'generating' && (
-        <div className="brutalist-card p-12 text-center">
-          <div className="animate-spin rounded-full mx-auto mb-4" style={{ width: 40, height: 40, border: '4px solid #00D4FF', borderTopColor: 'transparent' }} />
-          <p className="font-black text-navy uppercase">
-            {chain.length === 0 ? 'Creating your starting image...' : `Generating remix #${chain.length + 1}...`}
-          </p>
-        </div>
+        <GeneratingSpinner
+          label={chain.length === 0 ? 'Creating your starting image...' : `Generating remix #${chain.length + 1}...`}
+          color="#00D4FF"
+        />
       )}
 
       {phase === 'remixing' && latestStep && (
@@ -151,7 +163,7 @@ export default function AIRemixGame({ game }) {
           <div>
             <p className="text-xs font-black text-navy/50 uppercase mb-2">Current — Step {latestStep.step}</p>
             <div style={{ border: '3px solid #00D4FF', overflow: 'hidden' }}>
-              <img src={latestStep.url} alt={`Step ${latestStep.step}`} className="w-full object-cover" style={{ maxHeight: 400 }} />
+              <GameImage eager src={latestStep.url} alt={`Step ${latestStep.step}`} className="w-full object-cover" style={{ maxHeight: 400 }} />
             </div>
             <p className="text-xs text-navy/50 font-medium mt-1">"{latestStep.prompt}"</p>
           </div>
@@ -186,7 +198,7 @@ export default function AIRemixGame({ game }) {
             {chain.map((step, i) => (
               <div key={i} className="flex-none relative" style={{ width: 120 }}>
                 <div style={{ border: '2px solid #1A1A2E', overflow: 'hidden', height: 120 }}>
-                  <img src={step.url} alt={`Step ${step.step}`} className="w-full h-full object-cover" />
+                  <GameImage src={step.url} alt={`Step ${step.step}`} className="w-full h-full object-cover" />
                 </div>
                 <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-navy text-white text-[10px] font-black">
                   #{step.step}
@@ -221,16 +233,16 @@ export default function AIRemixGame({ game }) {
         <div>
           <h3 className="font-black text-navy uppercase text-sm mb-3">Past Chains ({savedChains.length})</h3>
           <div className="space-y-3">
-            {savedChains.slice(0, 3).map(chain => (
-              <div key={chain.id} className="brutalist-card p-3">
+            {savedChains.slice(0, 3).map(saved => (
+              <div key={saved.id} className="brutalist-card p-3">
                 <div className="flex gap-2 overflow-x-auto">
-                  {chain.steps.map((step, i) => (
+                  {saved.steps.map((step, i) => (
                     <div key={i} className="flex-none" style={{ width: 80, height: 80, border: '1px solid #1A1A2E', overflow: 'hidden' }}>
-                      <img src={step.url} alt="" className="w-full h-full object-cover" />
+                      <GameImage src={step.url} alt="" className="w-full h-full object-cover" />
                     </div>
                   ))}
                 </div>
-                <p className="text-[10px] text-navy/40 font-medium mt-2">by {chain.author} · {chain.steps.length} steps</p>
+                <p className="text-[10px] text-navy/40 font-medium mt-2">by {saved.author} · {saved.steps.length} steps</p>
               </div>
             ))}
           </div>

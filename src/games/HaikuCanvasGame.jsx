@@ -1,23 +1,39 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { addScore } from '../lib/storage'
 import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
+import { useLocalGallery } from '../hooks/useLocalGallery'
+import StatsBar from '../components/game/StatsBar'
+import ErrorBanner from '../components/game/ErrorBanner'
+import GameImage from '../components/game/GameImage'
 
 const STORAGE_KEY = 'ai_arcade_haiku_gallery'
 const TARGETS = [5, 7, 5]
 
-function countSyllables(text) {
-  if (!text.trim()) return 0
+function countWordSyllables(word) {
+  const norm = word.toLowerCase().replace(/[^a-z]/g, '')
+  if (!norm) return 0
   const vowels = 'aeiouy'
-  let count = 0, prev = false
-  const norm = text.toLowerCase().replace(/[^a-z]/g, '')
+  let count = 0
+  let prev = false
   for (const ch of norm) {
     const v = vowels.includes(ch)
     if (v && !prev) count++
     prev = v
   }
+  // Silent-e rule, applied per word
   if (norm.endsWith('e') && count > 1) count--
   return Math.max(1, count)
+}
+
+function countSyllables(text) {
+  if (!text.trim()) return 0
+  // Count per word so vowel groups never merge across word boundaries
+  // ("the old pond" is 3, not 2).
+  return text
+    .trim()
+    .split(/\s+/)
+    .reduce((sum, word) => sum + countWordSyllables(word), 0)
 }
 
 const ART_STYLES = [
@@ -32,19 +48,26 @@ export default function HaikuCanvasGame({ game }) {
   const username = user?.username || 'guest'
   const [lines, setLines] = useState(['', '', ''])
   const [style, setStyle] = useState('watercolor')
-  const [gallery, setGallery] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
+  const { items: gallery, add: addToGallery } = useLocalGallery(STORAGE_KEY, { cap: 30, mode: 'prepend' })
   const [generating, setGenerating] = useState(false)
   const [score, setScore] = useState(0)
   const [error, setError] = useState(null)
 
+  const aliveRef = useRef(true)
+  useEffect(() => {
+    aliveRef.current = true
+    return () => { aliveRef.current = false }
+  }, [])
+
   const sylCounts = lines.map(countSyllables)
   const lineOk = lines.map((l, i) => l.trim() && sylCounts[i] === TARGETS[i])
   const allOk = lineOk.every(Boolean)
+  const allFilled = lines.every(l => l.trim())
   const selectedStyle = ART_STYLES.find(s => s.id === style)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!allOk || generating) return
+    if (!allFilled || generating) return
     setGenerating(true)
     setError(null)
     const haiku = lines.join(' / ')
@@ -53,31 +76,33 @@ export default function HaikuCanvasGame({ game }) {
         `${selectedStyle.prompt} artwork inspired by haiku: "${haiku}". Evocative, artistic, beautiful mood.`,
         { width: 768, height: 512 }
       )
-      const entry = { id: Date.now(), url, lines: [...lines], style, author: username }
-      const updated = [entry, ...gallery].slice(0, 30)
-      setGallery(updated)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+      if (!aliveRef.current) return
+      const entry = { id: crypto.randomUUID(), url, lines: [...lines], style, author: username }
+      addToGallery(entry)
       const pts = game.pointsPerAction || 75
       setScore(s => s + pts)
       addScore(game.id, username, pts, { haiku })
       setLines(['', '', ''])
-    } catch (err) {
-      setError('Generation failed — check your Fal.ai key and try again.')
+    } catch {
+      if (!aliveRef.current) return
+      setError('Image generation failed — please try again.')
     } finally {
-      setGenerating(false)
+      if (aliveRef.current) setGenerating(false)
     }
   }
 
   return (
     <div className="flex flex-col gap-6">
       {/* Stats */}
-      <div className="flex items-center justify-between brutalist-card p-4">
-        <div><p className="text-xs font-black text-navy/50 uppercase">Your Haikus</p><p className="text-3xl font-black text-navy">{gallery.filter(g => g.author === username).length}</p></div>
-        <div><p className="text-xs font-black text-navy/50 uppercase">Total Gallery</p><p className="text-3xl font-black text-navy">{gallery.length}</p></div>
-        <div className="text-right"><p className="text-xs font-black text-navy/50 uppercase">Score</p><p className="text-3xl font-black text-primary">{score}</p></div>
-      </div>
+      <StatsBar
+        stats={[
+          { label: 'Your Haikus', value: gallery.filter(g => g.author === username).length },
+          { label: 'Total Gallery', value: gallery.length },
+          { label: 'Score', value: score, color: '#FF2D55' },
+        ]}
+      />
 
-      {error && <div className="p-3 bg-red-50 border-2 border-red-400 text-red-700 text-sm font-medium">{error}</div>}
+      <ErrorBanner message={error} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Form */}
@@ -114,9 +139,14 @@ export default function HaikuCanvasGame({ game }) {
               ))}
             </div>
           </div>
-          <button type="submit" disabled={!allOk || generating}
+          {allFilled && !allOk && (
+            <p className="text-xs font-medium" style={{ color: '#dc2626' }}>
+              Syllable counts look off — the counter is only a heuristic, so you can still submit.
+            </p>
+          )}
+          <button type="submit" disabled={!allFilled || generating}
             className="w-full py-3 font-black uppercase text-sm disabled:opacity-40 transition-opacity"
-            style={{ background: allOk ? '#FF2D55' : '#ccc', color: 'white', border: '2px solid #1A1A2E' }}>
+            style={{ background: allFilled ? '#FF2D55' : '#ccc', color: 'white', border: '2px solid #1A1A2E' }}>
             {generating ? '✦ Generating...' : `Submit & Generate Art (+${game.pointsPerAction} pts)`}
           </button>
         </form>
@@ -126,7 +156,7 @@ export default function HaikuCanvasGame({ game }) {
           <h3 className="font-black text-navy uppercase text-sm">Latest Creation</h3>
           {gallery.length > 0 ? (
             <div style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
-              <img src={gallery[0].url} alt="Latest haiku art" className="w-full object-cover" style={{ maxHeight: 240 }} />
+              <GameImage eager src={gallery[0].url} alt="Latest haiku art" className="w-full object-cover" style={{ maxHeight: 240 }} />
               <div className="p-3 bg-white">
                 {gallery[0].lines.map((l, i) => <p key={i} className="text-sm italic text-navy">{l}</p>)}
                 <p className="text-xs text-navy/50 mt-1">— {gallery[0].author}</p>
@@ -147,7 +177,7 @@ export default function HaikuCanvasGame({ game }) {
           <div className="flex gap-3 overflow-x-auto pb-2">
             {gallery.slice(1).map(item => (
               <div key={item.id} className="group relative flex-none overflow-hidden cursor-pointer" style={{ width: 160, height: 160, border: '2px solid #1A1A2E' }}>
-                <img src={item.url} alt="" className="w-full h-full object-cover" />
+                <GameImage src={item.url} alt="" className="w-full h-full object-cover" />
                 <div className="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-2 text-white">
                   {item.lines.map((l, i) => <p key={i} className="text-[10px] italic text-center leading-tight">{l}</p>)}
                   <p className="text-[9px] text-white/50 mt-1">— {item.author}</p>

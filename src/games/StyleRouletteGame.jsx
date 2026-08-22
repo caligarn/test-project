@@ -1,7 +1,14 @@
-import { useState, useCallback } from 'react'
-import { addScore } from '../lib/storage'
+import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
+import { useGameRounds } from '../hooks/useGameRounds'
+import { useRoundTimer } from '../hooks/useRoundTimer'
+import { pickRandom, shuffle, preloadImages } from '../lib/similarity'
+import StatsBar from '../components/game/StatsBar'
+import GameOverCard from '../components/game/GameOverCard'
+import GeneratingSpinner from '../components/game/GeneratingSpinner'
+import ErrorBanner from '../components/game/ErrorBanner'
+import GameImage from '../components/game/GameImage'
 
 const STYLES = [
   { id: 'impressionist', label: 'Impressionist', prompt: 'impressionist painting style, soft brushstrokes, light and color' },
@@ -23,69 +30,62 @@ const SUBJECTS = [
   'a medieval castle', 'a bustling cafe', 'a rainy day scene',
 ]
 
-function pickRandom(arr, exclude = []) {
-  const available = arr.filter(item => !exclude.includes(item.id || item))
-  return available[Math.floor(Math.random() * available.length)]
-}
-
-function shuffle(arr) {
-  const a = [...arr]
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]]
-  }
-  return a
-}
+const MAX_ROUNDS = 8
+const BASE_TIME = 15
 
 export default function StyleRouletteGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
-  const [round, setRound] = useState(1)
-  const [totalScore, setTotalScore] = useState(0)
+  const { round, totalScore, gameOver, token, isStale, recordScore, nextRound, restart } =
+    useGameRounds({ gameId: game.id, username, maxRounds: MAX_ROUNDS })
   const [streak, setStreak] = useState(0)
   const [imageUrl, setImageUrl] = useState(null)
   const [correctStyle, setCorrectStyle] = useState(null)
   const [options, setOptions] = useState([])
   const [selected, setSelected] = useState(null)
-  const [phase, setPhase] = useState('idle') // idle, loading, playing, result, gameover
+  const [roundPts, setRoundPts] = useState(0)
+  const [phase, setPhase] = useState('idle') // idle, loading, playing, result
   const [error, setError] = useState(null)
-  const [timeLeft, setTimeLeft] = useState(null)
-  const [timerId, setTimerId] = useState(null)
+  const [usedSubjects, setUsedSubjects] = useState([])
+  const [usedStyles, setUsedStyles] = useState([])
 
-  const maxRounds = 8
-  const baseTime = 15
+  const { timeLeft, start: startTimer, stop: stopTimer } = useRoundTimer(() => {
+    // Time ran out without an answer
+    if (phase !== 'playing') return
+    setSelected('timeout')
+    setStreak(0)
+    setRoundPts(0)
+    recordScore(0)
+    setPhase('result')
+  })
 
   const startRound = async () => {
     setPhase('loading')
     setError(null)
     setSelected(null)
 
-    const subject = pickRandom(SUBJECTS)
-    const correct = pickRandom(STYLES)
+    const subject = pickRandom(SUBJECTS, usedSubjects)
+    const correct = pickRandom(STYLES, usedStyles)
     setCorrectStyle(correct)
+    setUsedSubjects(prev => [...prev, subject])
+    setUsedStyles(prev => [...prev, correct])
 
     // Pick 3 wrong styles
     const wrongStyles = shuffle(STYLES.filter(s => s.id !== correct.id)).slice(0, 3)
     setOptions(shuffle([correct, ...wrongStyles]))
 
+    const t = token()
     try {
       const url = await generateImage(`${subject}, ${correct.prompt}`)
+      if (isStale(t)) return
+      // Preload so the countdown never runs against a blank image
+      await preloadImages([url])
+      if (isStale(t)) return
       setImageUrl(url)
       setPhase('playing')
-      // Start timer
-      const deadline = baseTime
-      setTimeLeft(deadline)
-      const id = setInterval(() => {
-        setTimeLeft(prev => {
-          if (prev <= 1) {
-            clearInterval(id)
-            return 0
-          }
-          return prev - 1
-        })
-      }, 1000)
-      setTimerId(id)
+      startTimer(BASE_TIME)
     } catch {
+      if (isStale(t)) return
       setError('Image generation failed.')
       setPhase('idle')
     }
@@ -93,82 +93,76 @@ export default function StyleRouletteGame({ game }) {
 
   const handleSelect = (style) => {
     if (selected || phase !== 'playing') return
-    if (timerId) clearInterval(timerId)
+    stopTimer()
     setSelected(style.id)
     const isCorrect = style.id === correctStyle.id
     const timeBonus = Math.max(0, (timeLeft || 0) * 2)
     const streakBonus = streak * 5
     const pts = isCorrect ? 100 + timeBonus + streakBonus : 0
     setStreak(isCorrect ? streak + 1 : 0)
-    setTotalScore(s => s + pts)
-    if (isCorrect) {
-      addScore(game.id, username, pts, { style: correctStyle.id, round, timeLeft })
-    }
+    setRoundPts(pts)
+    recordScore(pts)
     setPhase('result')
   }
 
-  // Handle time running out
-  if (timeLeft === 0 && phase === 'playing') {
-    setSelected('timeout')
-    setStreak(0)
-    setPhase('result')
-  }
-
-  const nextRound = () => {
-    if (round >= maxRounds) {
-      setPhase('gameover')
-      return
-    }
-    setRound(r => r + 1)
+  const handleNextRound = () => {
+    stopTimer()
+    nextRound()
+    setImageUrl(null)
+    setSelected(null)
     setPhase('idle')
   }
 
-  const restart = () => {
-    setRound(1)
-    setTotalScore(0)
+  const handleRestart = () => {
+    stopTimer()
+    restart()
     setStreak(0)
+    setImageUrl(null)
+    setCorrectStyle(null)
+    setOptions([])
+    setSelected(null)
+    setRoundPts(0)
+    setError(null)
+    setUsedSubjects([])
+    setUsedStyles([])
     setPhase('idle')
   }
 
-  if (phase === 'gameover') {
+  if (gameOver) {
     return (
       <div className="flex flex-col gap-4">
-        <div className="brutalist-card p-8 text-center">
-          <p className="text-5xl mb-4">🎨</p>
-          <h3 className="text-2xl font-black text-navy uppercase mb-2">Roulette Complete!</h3>
-          <p className="text-4xl font-black text-primary mb-2">{totalScore} pts</p>
-          <p className="text-navy/50 text-sm font-medium mb-6">{maxRounds} rounds completed</p>
-          <button onClick={restart}
-            className="px-8 py-3 bg-primary text-white font-black uppercase text-sm"
-            style={{ border: '2px solid #1A1A2E' }}>
-            Spin Again
-          </button>
-        </div>
+        <GameOverCard
+          emoji="🎨"
+          title="Roulette Complete!"
+          score={`${totalScore} pts`}
+          subtitle={`${MAX_ROUNDS} rounds completed`}
+          onRestart={handleRestart}
+          restartLabel="Spin Again"
+        />
       </div>
     )
   }
 
+  const stats = [
+    { label: 'Round', value: `${round}/${MAX_ROUNDS}` },
+    { label: 'Streak', value: `🔥 ${streak}` },
+    ...(phase === 'playing' && timeLeft !== null
+      ? [{ label: 'Time', value: `${timeLeft}s`, color: timeLeft <= 5 ? '#FF2D55' : undefined }]
+      : []),
+    { label: 'Score', value: totalScore, color: '#FF2D55' },
+  ]
+
   return (
     <div className="flex flex-col gap-4">
-      {/* Stats */}
-      <div className="flex items-center justify-between brutalist-card p-4">
-        <div><p className="text-xs font-black text-navy/50 uppercase">Round</p><p className="text-3xl font-black text-navy">{round}/{maxRounds}</p></div>
-        <div className="text-center"><p className="text-xs font-black text-navy/50 uppercase">Streak</p><p className="text-3xl font-black text-navy">🔥 {streak}</p></div>
-        {phase === 'playing' && timeLeft !== null && (
-          <div className="text-center"><p className="text-xs font-black text-navy/50 uppercase">Time</p>
-            <p className={`text-3xl font-black ${timeLeft <= 5 ? 'text-primary' : 'text-navy'}`}>{timeLeft}s</p>
-          </div>
-        )}
-        <div className="text-right"><p className="text-xs font-black text-navy/50 uppercase">Score</p><p className="text-3xl font-black text-primary">{totalScore}</p></div>
-      </div>
+      <StatsBar stats={stats} />
 
-      {error && <div className="p-3 bg-red-50 border-2 border-red-400 text-red-700 text-sm font-medium">{error}</div>}
+      <ErrorBanner message={error} />
 
       {phase === 'idle' && (
         <div className="brutalist-card p-12 text-center">
           <p className="text-5xl mb-4">🎨</p>
           <h3 className="font-black text-navy uppercase mb-2">Round {round}</h3>
-          <p className="text-navy/50 text-sm mb-6 font-medium">Identify the art style of the AI-generated image. You have {baseTime} seconds!</p>
+          <p className="text-navy/50 text-sm mb-6 font-medium">Identify the art style of the AI-generated image. You have {BASE_TIME} seconds!</p>
           <button onClick={startRound}
             className="px-8 py-3 bg-[#FF6B35] text-white font-black uppercase text-sm"
             style={{ border: '2px solid #1A1A2E' }}>
@@ -178,16 +172,13 @@ export default function StyleRouletteGame({ game }) {
       )}
 
       {phase === 'loading' && (
-        <div className="brutalist-card p-12 text-center">
-          <div className="animate-spin rounded-full mx-auto mb-4" style={{ width: 40, height: 40, border: '4px solid #1A1A2E', borderTopColor: 'transparent' }} />
-          <p className="font-black text-navy uppercase">Generating styled image...</p>
-        </div>
+        <GeneratingSpinner label="Generating styled image..." color="#FF6B35" />
       )}
 
       {(phase === 'playing' || phase === 'result') && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
-            <img src={imageUrl} alt="Styled image" className="w-full object-cover" style={{ maxHeight: 400 }} />
+            <GameImage src={imageUrl} alt="Styled image" className="w-full object-cover" style={{ maxHeight: 400 }} eager />
           </div>
           <div className="flex flex-col gap-3">
             <h3 className="font-black text-navy uppercase text-sm">What art style is this?</h3>
@@ -216,14 +207,14 @@ export default function StyleRouletteGame({ game }) {
             {phase === 'result' && (
               <div className="text-center mt-2">
                 {selected === correctStyle.id ? (
-                  <p className="text-lg font-black text-green-600">Correct! +{100 + Math.max(0, (timeLeft || 0) * 2) + (streak > 0 ? (streak - 1) * 5 : 0)} pts</p>
+                  <p className="text-lg font-black text-green-600">Correct! +{roundPts} pts</p>
                 ) : (
                   <p className="text-lg font-black text-red-500">{selected === 'timeout' ? 'Time\'s up!' : 'Wrong!'} The style was {correctStyle.label}</p>
                 )}
-                <button onClick={nextRound}
+                <button onClick={handleNextRound}
                   className="mt-3 px-8 py-3 bg-navy text-white font-black uppercase text-sm"
                   style={{ border: '2px solid #1A1A2E' }}>
-                  {round >= maxRounds ? 'See Final Score' : 'Next Round →'}
+                  {round >= MAX_ROUNDS ? 'See Final Score' : 'Next Round →'}
                 </button>
               </div>
             )}
