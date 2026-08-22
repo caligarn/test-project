@@ -5,13 +5,7 @@ let configured = false
 
 export function configureFal(apiKey) {
   if (apiKey) {
-    fal.config({
-      credentials: apiKey,
-      requestMiddleware: async (request) => {
-        // Remove any proxy routing — hit fal.ai directly
-        return request
-      },
-    })
+    fal.config({ credentials: apiKey })
     configured = true
     localStorage.setItem('fal_api_key', apiKey)
   }
@@ -59,6 +53,7 @@ export async function generateImage(prompt, options = {}) {
     height = 512,
   } = options
 
+  isConfigured()
   return withRetry(async () => {
     const result = await fal.subscribe(model, {
       input: {
@@ -74,6 +69,7 @@ export async function generateImage(prompt, options = {}) {
 }
 
 export async function generateImageVariations(prompt, count = 4) {
+  isConfigured()
   return withRetry(async () => {
     const result = await fal.subscribe('fal-ai/flux/schnell', {
       input: {
@@ -110,6 +106,7 @@ export function connectRealtime(onResult, onError) {
 // Standard image-to-image fallback
 export async function generateFromSketch(prompt, imageDataUrl, options = {}) {
   const { strength = 0.65 } = options
+  isConfigured()
   return withRetry(async () => {
     const result = await fal.subscribe('fal-ai/lcm-sd15-i2i', {
       input: {
