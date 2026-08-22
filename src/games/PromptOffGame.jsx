@@ -486,14 +486,17 @@ export default function PromptOffGame({ game }) {
 
     // Use a fresh code for the voting room to avoid PeerJS ID conflicts
     const code = generateRoomCode()
-    setVoteRoomCode(code)
-    setAudienceVotes({ A: 0, B: 0 })
-    setAudienceCount(0)
-    setVotingClosed(false)
     audienceVotesRef.current = { A: 0, B: 0 }
     votingClosedRef.current = false
     votedPeerIdsRef.current = new Set()
     voteConnectionsRef.current = []
+    // Defer the state resets so the effect body stays a pure external-system sync
+    const initTimeout = setTimeout(() => {
+      setVoteRoomCode(code)
+      setAudienceVotes({ A: 0, B: 0 })
+      setAudienceCount(0)
+      setVotingClosed(false)
+    }, 0)
 
     const votePeer = new Peer(`promptoff-vote-${code}`)
     votePeerRef.current = votePeer
@@ -531,6 +534,7 @@ export default function PromptOffGame({ game }) {
     send({ type: 'vote-room', code })
 
     return () => {
+      clearTimeout(initTimeout)
       if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
       voteConnectionsRef.current = []
     }

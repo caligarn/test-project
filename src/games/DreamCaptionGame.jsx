@@ -54,7 +54,6 @@ export default function DreamCaptionGame({ game }) {
   const username = user?.username || 'guest'
   const { items: gallery, add: addToGallery, update: updateEntry } = useLocalGallery(STORAGE_KEY, { cap: 50, mode: 'prepend' })
   const [imageUrl, setImageUrl] = useState(null)
-  const [dreamPrompt, setDreamPrompt] = useState(null)
   const [caption, setCaption] = useState('')
   const [phase, setPhase] = useState('idle') // idle, generating, captioning, submitted
   const [error, setError] = useState(null)
@@ -73,7 +72,6 @@ export default function DreamCaptionGame({ game }) {
     setError(null)
     setCaption('')
     const prompt = DREAM_PROMPTS[Math.floor(Math.random() * DREAM_PROMPTS.length)]
-    setDreamPrompt(prompt)
     try {
       const url = await generateImage(`Surreal dreamlike artwork: ${prompt}. Ethereal, mystical, impossible, dreamscape.`)
       if (!aliveRef.current) return
@@ -123,7 +121,6 @@ export default function DreamCaptionGame({ game }) {
 
   const newDream = () => {
     setImageUrl(null)
-    setDreamPrompt(null)
     setCaption('')
     setSubmitted(null)
     setPhase('idle')
