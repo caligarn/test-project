@@ -197,10 +197,9 @@ export default function SpeedPromptGame({ game }) {
       )}
 
       {phase === 'generating' && (
-        <div className="brutalist-card p-12 text-center">
-          <div className="animate-spin rounded-full mx-auto mb-4" style={{ width: 40, height: 40, border: '4px solid #1A1A2E22', borderTopColor: '#1A1A2E' }} />
-          <p className="font-black text-navy uppercase">Generating your image...</p>
-          <p className="text-navy/50 text-xs font-medium mt-2">"{prompt}"</p>
+        <div className="flex flex-col gap-2">
+          <GeneratingSpinner label="Generating your image..." color="#1A1A2E" />
+          <p className="text-navy/50 text-xs font-medium text-center">"{prompt}"</p>
         </div>
       )}
 

@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { addScore } from '../lib/storage'
 import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
+import { useLocalGallery } from '../hooks/useLocalGallery'
+import ErrorBanner from '../components/game/ErrorBanner'
+import GameImage from '../components/game/GameImage'
 import { BookOpen, Plus, ChevronLeft, ChevronRight, X } from 'lucide-react'
 
 const STORAGE_KEY = 'ai_arcade_comic_panels'
@@ -10,7 +13,7 @@ const PANELS_PER_PAGE = 6
 export default function CommunityComicGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
-  const [panels, setPanels] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
+  const { items: panels, add: addPanel } = useLocalGallery(STORAGE_KEY, { cap: 60, mode: 'append' })
   const [page, setPage] = useState(0)
   const [showForm, setShowForm] = useState(false)
   const [text, setText] = useState('')
@@ -18,6 +21,22 @@ export default function CommunityComicGame({ game }) {
   const [score, setScore] = useState(0)
   const [error, setError] = useState(null)
   const [zoom, setZoom] = useState(null)
+
+  const aliveRef = useRef(true)
+  useEffect(() => {
+    aliveRef.current = true
+    return () => { aliveRef.current = false }
+  }, [])
+
+  // Escape closes the zoom modal
+  useEffect(() => {
+    if (!zoom) return
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setZoom(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [zoom])
 
   const totalPages = Math.max(1, Math.ceil(panels.length / PANELS_PER_PAGE))
   const pagePanels = panels.slice(page * PANELS_PER_PAGE, (page + 1) * PANELS_PER_PAGE)
@@ -37,27 +56,27 @@ export default function CommunityComicGame({ game }) {
         `Comic book panel art style, dramatic illustration. ${contextPrompt}. Bold outlines, vibrant colors, cinematic composition.`,
         { width: 512, height: 384 }
       )
+      if (!aliveRef.current) return
       const panel = {
-        id: Date.now(),
+        id: crypto.randomUUID(),
         url,
         text: text.trim(),
         author: username,
         panelNumber: panels.length + 1,
       }
-      const updated = [...panels, panel]
-      setPanels(updated)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+      const updated = addPanel(panel)
       const pts = game.pointsPerAction || 80
       setScore(s => s + pts)
       addScore(game.id, username, pts, { text })
       setText('')
       setShowForm(false)
       // Jump to last page
-      setPage(Math.floor(updated.length / PANELS_PER_PAGE))
-    } catch (err) {
-      setError('Generation failed — check your Fal.ai key.')
+      setPage(Math.ceil(updated.length / PANELS_PER_PAGE) - 1)
+    } catch {
+      if (!aliveRef.current) return
+      setError('Image generation failed — please try again.')
     } finally {
-      setGenerating(false)
+      if (aliveRef.current) setGenerating(false)
     }
   }
 
@@ -80,7 +99,7 @@ export default function CommunityComicGame({ game }) {
         <div className="text-right"><p className="text-xs font-black text-navy/50 uppercase">Score</p><p className="text-2xl font-black text-primary">{score}</p></div>
       </div>
 
-      {error && <div className="p-3 bg-red-50 border-2 border-red-400 text-red-700 text-sm font-medium">{error}</div>}
+      <ErrorBanner message={error} />
 
       {/* Add panel form */}
       {showForm && (
@@ -136,7 +155,7 @@ export default function CommunityComicGame({ game }) {
               <div key={panel.id} className="flex flex-col" style={{ border: '3px solid #1A1A2E', overflow: 'hidden', cursor: 'pointer' }}
                 onClick={() => setZoom(panel)}>
                 <div style={{ position: 'relative', aspectRatio: '4/3', background: '#f3f4f6', overflow: 'hidden' }}>
-                  <img src={panel.url} alt={`Panel ${panel.panelNumber}`} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                  <GameImage src={panel.url} alt={`Panel ${panel.panelNumber}`} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                   <div style={{ position: 'absolute', top: 6, left: 6, background: '#1A1A2E', color: 'white', padding: '2px 8px', fontSize: 11, fontWeight: 900 }}>#{panel.panelNumber}</div>
                 </div>
                 <div style={{ padding: '8px 12px', background: 'white', borderTop: '2px solid #1A1A2E' }}>
@@ -174,7 +193,7 @@ export default function CommunityComicGame({ game }) {
       {zoom && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setZoom(null)}>
           <div className="max-w-lg w-full" style={{ border: '4px solid #1A1A2E' }} onClick={e => e.stopPropagation()}>
-            <img src={zoom.url} alt="" className="w-full" style={{ display: 'block' }} />
+            <GameImage eager src={zoom.url} alt="" className="w-full" style={{ display: 'block' }} />
             <div style={{ background: 'white', padding: '12px 16px', borderTop: '3px solid #1A1A2E' }}>
               <p className="text-sm text-navy font-medium">{zoom.text}</p>
               <p className="text-xs text-navy/40 mt-1 font-bold">— {zoom.author} · Panel #{zoom.panelNumber}</p>

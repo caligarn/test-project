@@ -1,7 +1,13 @@
 import { useState } from 'react'
-import { addScore } from '../lib/storage'
 import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
+import { useGameRounds } from '../hooks/useGameRounds'
+import { pickRandom } from '../lib/similarity'
+import StatsBar from '../components/game/StatsBar'
+import GameOverCard from '../components/game/GameOverCard'
+import GeneratingSpinner from '../components/game/GeneratingSpinner'
+import ErrorBanner from '../components/game/ErrorBanner'
+import GameImage from '../components/game/GameImage'
 
 const EMOJI_CATEGORIES = [
   {
@@ -56,25 +62,27 @@ const PROMPTS = [
   'A winter wonderland',
 ]
 
+const MAX_ROUNDS = 5
+const MAX_EMOJIS = 20
+
 export default function EmojiPromptGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
-  const [phase, setPhase] = useState('idle') // idle, building, generating, result, gameover
+  const { round, totalScore, gameOver, token, isStale, recordScore, nextRound, restart } =
+    useGameRounds({ gameId: game.id, username, maxRounds: MAX_ROUNDS })
+  const [phase, setPhase] = useState('idle') // idle, building, generating, result
   const [prompt, setPrompt] = useState(null)
   const [emojiSequence, setEmojiSequence] = useState([])
   const [imageUrl, setImageUrl] = useState(null)
   const [error, setError] = useState(null)
-  const [round, setRound] = useState(1)
-  const [totalScore, setTotalScore] = useState(0)
   const [roundScore, setRoundScore] = useState(0)
   const [expandedCategory, setExpandedCategory] = useState(null)
-
-  const maxRounds = 5
-  const maxEmojis = 20
+  const [usedThemes, setUsedThemes] = useState([])
 
   const startRound = () => {
-    const p = PROMPTS[Math.floor(Math.random() * PROMPTS.length)]
+    const p = pickRandom(PROMPTS, usedThemes)
     setPrompt(p)
+    setUsedThemes(prev => [...prev, p])
     setEmojiSequence([])
     setImageUrl(null)
     setError(null)
@@ -84,7 +92,7 @@ export default function EmojiPromptGame({ game }) {
   }
 
   const addEmoji = (emoji) => {
-    if (emojiSequence.length >= maxEmojis) return
+    if (emojiSequence.length >= MAX_EMOJIS) return
     setEmojiSequence(prev => [...prev, emoji])
   }
 
@@ -103,8 +111,10 @@ export default function EmojiPromptGame({ game }) {
     const emojiString = emojiSequence.join(' ')
     const aiPrompt = `Create an image based on these emojis: ${emojiString}. The emojis describe a scene about: ${prompt}. Interpret the emojis literally and combine them into a cohesive, detailed scene.`
 
+    const t = token()
     try {
       const url = await generateImage(aiPrompt)
+      if (isStale(t)) return
       setImageUrl(url)
 
       // Score based on emoji count (variety/effort) + base
@@ -113,67 +123,57 @@ export default function EmojiPromptGame({ game }) {
       const varietyBonus = Math.min(40, uniqueEmojis * 4)
       const pts = 20 + countBonus + varietyBonus
       setRoundScore(pts)
-      setTotalScore(s => s + pts)
-      addScore(game.id, username, pts, { emojis: emojiString, prompt })
+      recordScore(pts)
       setPhase('result')
     } catch {
+      if (isStale(t)) return
       setError('Image generation failed.')
       setPhase('building')
     }
   }
 
-  const nextRound = () => {
-    if (round >= maxRounds) {
-      setPhase('gameover')
-      return
-    }
-    setRound(r => r + 1)
+  const handleNextRound = () => {
+    nextRound()
     setPhase('idle')
   }
 
-  const restart = () => {
-    setRound(1)
-    setTotalScore(0)
+  const handleRestart = () => {
+    restart()
+    setPrompt(null)
+    setEmojiSequence([])
+    setImageUrl(null)
+    setError(null)
+    setRoundScore(0)
+    setExpandedCategory(null)
+    setUsedThemes([])
     setPhase('idle')
   }
 
-  if (phase === 'gameover') {
+  if (gameOver) {
     return (
       <div className="flex flex-col gap-4">
-        <div className="brutalist-card p-8 text-center">
-          <p className="text-5xl mb-4">😎</p>
-          <h3 className="text-2xl font-black text-navy uppercase mb-2">Emoji Master!</h3>
-          <p className="text-4xl font-black text-primary mb-2">{totalScore} pts</p>
-          <p className="text-navy/50 text-sm font-medium mb-6">{maxRounds} rounds completed</p>
-          <button onClick={restart}
-            className="px-8 py-3 bg-primary text-white font-black uppercase text-sm"
-            style={{ border: '2px solid #1A1A2E' }}>
-            Play Again
-          </button>
-        </div>
+        <GameOverCard
+          emoji="😎"
+          title="Emoji Master!"
+          score={`${totalScore} pts`}
+          subtitle={`${MAX_ROUNDS} rounds completed`}
+          onRestart={handleRestart}
+        />
       </div>
     )
   }
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Stats */}
-      <div className="flex items-center justify-between brutalist-card p-4">
-        <div>
-          <p className="text-xs font-black text-navy/50 uppercase">Round</p>
-          <p className="text-3xl font-black text-navy">{round}/{maxRounds}</p>
-        </div>
-        <div className="text-center">
-          <p className="text-xs font-black text-navy/50 uppercase">Emojis</p>
-          <p className="text-3xl font-black text-navy">{emojiSequence.length}/{maxEmojis}</p>
-        </div>
-        <div className="text-right">
-          <p className="text-xs font-black text-navy/50 uppercase">Score</p>
-          <p className="text-3xl font-black text-primary">{totalScore}</p>
-        </div>
-      </div>
+      <StatsBar
+        stats={[
+          { label: 'Round', value: `${round}/${MAX_ROUNDS}` },
+          { label: 'Emojis', value: `${emojiSequence.length}/${MAX_EMOJIS}` },
+          { label: 'Score', value: totalScore, color: '#FF2D55' },
+        ]}
+      />
 
-      {error && <div className="p-3 bg-red-50 border-2 border-red-400 text-red-700 text-sm font-medium">{error}</div>}
+      <ErrorBanner message={error} />
 
       {phase === 'idle' && (
         <div className="brutalist-card p-12 text-center">
@@ -241,7 +241,7 @@ export default function EmojiPromptGame({ game }) {
                   <div className="flex flex-wrap gap-1 p-2">
                     {cat.emojis.map((emoji, ei) => (
                       <button key={ei} onClick={() => addEmoji(emoji)}
-                        disabled={emojiSequence.length >= maxEmojis}
+                        disabled={emojiSequence.length >= MAX_EMOJIS}
                         className="w-10 h-10 text-xl flex items-center justify-center hover:bg-amber-100 transition-colors rounded disabled:opacity-30"
                         style={{ border: '1px solid #1A1A2E22' }}>
                         {emoji}
@@ -263,10 +263,9 @@ export default function EmojiPromptGame({ game }) {
       )}
 
       {phase === 'generating' && (
-        <div className="brutalist-card p-12 text-center">
-          <div className="animate-spin rounded-full mx-auto mb-4" style={{ width: 40, height: 40, border: '4px solid #F59E0B', borderTopColor: 'transparent' }} />
-          <p className="font-black text-navy uppercase">Turning emojis into art...</p>
-          <p className="text-3xl mt-3">{emojiSequence.join(' ')}</p>
+        <div className="flex flex-col gap-2">
+          <GeneratingSpinner label="Turning emojis into art..." color="#F59E0B" />
+          <p className="text-3xl text-center">{emojiSequence.join(' ')}</p>
         </div>
       )}
 
@@ -278,7 +277,7 @@ export default function EmojiPromptGame({ game }) {
               <p className="text-2xl leading-relaxed">{emojiSequence.join(' ')}</p>
             </div>
             <div style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
-              <img src={imageUrl} alt="Generated from emojis" className="w-full object-cover" style={{ maxHeight: 400 }} />
+              <GameImage src={imageUrl} alt="Generated from emojis" className="w-full object-cover" style={{ maxHeight: 400 }} eager />
             </div>
           </div>
           <div className="brutalist-card p-6 text-center flex flex-col justify-center gap-3">
@@ -288,10 +287,10 @@ export default function EmojiPromptGame({ game }) {
               <p className="text-navy/50 font-bold uppercase text-xs">Theme: "{prompt}"</p>
               <p className="text-navy/50 font-bold text-xs">{emojiSequence.length} emojis used, {new Set(emojiSequence).size} unique</p>
             </div>
-            <button onClick={nextRound}
+            <button onClick={handleNextRound}
               className="mt-2 w-full py-3 bg-navy text-white font-black uppercase text-sm"
               style={{ border: '2px solid #1A1A2E' }}>
-              {round >= maxRounds ? 'See Final Score' : 'Next Round →'}
+              {round >= MAX_ROUNDS ? 'See Final Score' : 'Next Round →'}
             </button>
           </div>
         </div>

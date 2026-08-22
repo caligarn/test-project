@@ -174,7 +174,7 @@ export default function PromptOffGame({ game }) {
   function cleanupPeer() {
     if (timerRef.current) clearInterval(timerRef.current)
     if (joinTimeoutRef.current) { clearTimeout(joinTimeoutRef.current); joinTimeoutRef.current = null }
-    if (realtimeRef.current) { try { realtimeRef.current.close() } catch {} realtimeRef.current = null }
+    if (realtimeRef.current) { try { realtimeRef.current.close() } catch { /* ignore */ } realtimeRef.current = null }
     if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
     if (connRef.current) { connRef.current.close(); connRef.current = null }
     if (peerRef.current) { peerRef.current.destroy(); peerRef.current = null }
@@ -304,7 +304,7 @@ export default function PromptOffGame({ game }) {
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
-      if (realtimeRef.current) { try { realtimeRef.current.close() } catch {} realtimeRef.current = null }
+      if (realtimeRef.current) { try { realtimeRef.current.close() } catch { /* ignore */ } realtimeRef.current = null }
       if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
     }
   }, [phase])
@@ -384,7 +384,7 @@ export default function PromptOffGame({ game }) {
 
   async function submitFinal(promptText) {
     if (timerRef.current) clearInterval(timerRef.current)
-    if (realtimeRef.current) { try { realtimeRef.current.close() } catch {} realtimeRef.current = null }
+    if (realtimeRef.current) { try { realtimeRef.current.close() } catch { /* ignore */ } realtimeRef.current = null }
     setPhase('generating')
     setMyFinalPrompt(promptText)
     try {
