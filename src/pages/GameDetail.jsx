@@ -1,23 +1,36 @@
+import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import {
-  ArrowLeft,
-  Play,
-  Users,
-  Trophy,
-  Clock,
-  Star,
-  Lock,
-} from 'lucide-react'
-import { getGame } from '../lib/gameData'
+import { ArrowLeft, Play, Trophy, Star, Users, Coins, RefreshCw } from 'lucide-react'
+import { getGame, DAILY } from '../lib/gameData'
+import { gameLimits } from '../lib/gameLimits'
 import { getLeaderboard } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
+import { api } from '../lib/api'
+
+function rankColor(i) {
+  return i === 0 ? 'text-gold' : i === 1 ? 'text-silver' : i === 2 ? 'text-bronze' : 'text-navy/30'
+}
 
 export default function GameDetail() {
   const { gameId } = useParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
   const game = getGame(gameId)
-  const leaderboard = getLeaderboard(gameId, 5)
+  const id = game?.id
+  const [plays, setPlays] = useState(0)
+  const [board, setBoard] = useState({ id: null, rows: [], error: null })
+
+  useEffect(() => {
+    if (!id) return
+    let active = true
+    getLeaderboard(id, 5)
+      .then((rows) => { if (active) setBoard({ id, rows: rows || [], error: null }) })
+      .catch((err) => { if (active) setBoard({ id, rows: [], error: err.message || 'Could not load scores.' }) })
+    if (id !== DAILY.id) {
+      api('/stats')
+        .then((data) => { if (active) setPlays(Number(data.plays?.[id]) || 0) })
+        .catch(() => { /* play count is optional */ })
+    }
+    return () => { active = false }
+  }, [id])
 
   if (!game) {
     return (
@@ -35,11 +48,23 @@ export default function GameDetail() {
   }
 
   const isLightBg = game.color === '#C8FF00' || game.color === '#FFD600'
-  const SAMPLE_SCREENSHOTS = [1, 2, 3]
+  const isDaily = game.id === DAILY.id
+  const limits = gameLimits(game.id)
+  const loadingBoard = board.id !== game.id
+  const leaderboard = loadingBoard ? [] : board.rows
+
+  const stats = [
+    { icon: Trophy, label: isDaily ? 'Today\'s best' : 'High score', value: loadingBoard ? '...' : leaderboard[0]?.score?.toLocaleString() || 'None yet' },
+    { icon: Users, label: 'Mode', value: game.party ? 'Solo or party' : isDaily ? 'Once a day' : 'Solo' },
+    isDaily
+      ? { icon: Coins, label: 'Cost', value: 'Free' }
+      : plays > 0
+      ? { icon: Play, label: 'Plays', value: plays.toLocaleString() }
+      : { icon: Coins, label: 'Cost', value: '1 credit' },
+  ]
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
-      {/* Back */}
       <button
         onClick={() => navigate(-1)}
         className="flex items-center gap-1.5 text-navy/50 hover:text-navy text-sm font-bold mb-4 transition-colors uppercase"
@@ -50,12 +75,12 @@ export default function GameDetail() {
 
       {/* Hero */}
       <div
-        className="relative overflow-hidden p-8 md:p-12 mb-6 border-3"
+        className="relative overflow-hidden p-6 md:p-12 mb-6 border-3"
         style={{ backgroundColor: game.color, borderWidth: '3px', borderColor: '#1A1A2E' }}
       >
         <div className="relative z-10">
           <span className="text-5xl md:text-6xl mb-4 block">{game.icon}</span>
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex flex-wrap items-center gap-2 mb-2">
             <span
               className={`tag ${
                 game.difficulty === 'Easy'
@@ -67,6 +92,12 @@ export default function GameDetail() {
             >
               {game.difficulty}
             </span>
+            {game.party && <span className="tag bg-white text-navy">Party</span>}
+            {plays > 0 && (
+              <span className={`text-xs font-bold ${isLightBg ? 'text-navy/70' : 'text-white/80'}`}>
+                {plays.toLocaleString()} {plays === 1 ? 'play' : 'plays'}
+              </span>
+            )}
           </div>
           <h1 className={`text-3xl md:text-4xl font-black ${isLightBg ? 'text-navy' : 'text-white'} mb-2 uppercase`}>
             {game.title}
@@ -87,65 +118,40 @@ export default function GameDetail() {
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3 mb-6">
-        {[
-          { icon: Users, label: 'Players', value: game.players },
-          { icon: Trophy, label: 'High Score', value: leaderboard[0]?.score || '—' },
-          { icon: Clock, label: 'Avg. Time', value: '3 min' },
-        ].map(({ icon: Icon, label, value }) => (
-          <div
-            key={label}
-            className="brutalist-card p-4 text-center"
-          >
-            <Icon className="w-5 h-5 text-navy/40 mx-auto mb-2" />
-            <p className="text-navy font-black text-lg">{value}</p>
-            <p className="text-navy/50 text-xs font-bold uppercase">{label}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Screenshots Placeholder */}
-      <section className="mb-6">
-        <h2 className="text-lg font-black text-navy mb-3 uppercase">Screenshots</h2>
-        <div className="flex gap-3 overflow-x-auto pb-2">
-          {SAMPLE_SCREENSHOTS.map((i) => (
-            <div
-              key={i}
-              className="shrink-0 w-56 h-36 flex items-center justify-center border-3"
-              style={{ backgroundColor: game.color, opacity: 0.6, borderWidth: '3px', borderColor: '#1A1A2E' }}
-            >
-              <span className={`${isLightBg ? 'text-navy/40' : 'text-white/40'} text-sm font-bold`}>Preview {i}</span>
+        {stats.map((s) => {
+          const StatIcon = s.icon
+          return (
+            <div key={s.label} className="brutalist-card p-3 sm:p-4 text-center">
+              <StatIcon className="w-5 h-5 text-navy/40 mx-auto mb-2" />
+              <p className="text-navy font-black text-sm sm:text-lg">{s.value}</p>
+              <p className="text-navy/50 text-[10px] sm:text-xs font-bold uppercase">{s.label}</p>
             </div>
-          ))}
-        </div>
-      </section>
+          )
+        })}
+      </div>
 
       {/* How to Play */}
       <section className="mb-6">
         <h2 className="text-lg font-black text-navy mb-3 uppercase">How to Play</h2>
-        <div className="brutalist-card p-5">
-          <ol className="space-y-3">
-            {[
-              'AI generates an image using Fal.ai',
-              'Study the image carefully',
-              'Submit your answer before time runs out',
-              'Score points based on accuracy',
-              'Climb the leaderboard!',
-            ].map((step, i) => (
-              <li key={i} className="flex items-start gap-3 text-sm">
-                <span className="w-6 h-6 shrink-0 bg-primary text-white text-xs font-black flex items-center justify-center border-2 border-navy">
-                  {i + 1}
-                </span>
-                <span className="text-navy/80 font-medium">{step}</span>
-              </li>
-            ))}
-          </ol>
+        <div className="brutalist-card p-5 space-y-3">
+          <p className="text-navy/80 text-sm font-medium">{game.howToPlay}</p>
+          {game.party && (
+            <p className="text-navy/80 text-sm font-medium">
+              <span className="font-black uppercase text-navy">Party mode:</span> play with friends on your phones. One person starts a room and shares the code, everyone else joins.
+            </p>
+          )}
+          <p className="text-navy/50 text-xs font-bold uppercase">
+            {isDaily
+              ? 'Free to play. Log in to get on today\'s leaderboard.'
+              : `1 credit per game, good for up to ${limits?.maxUnits || 10} AI images or judge calls.`}
+          </p>
         </div>
       </section>
 
       {/* Leaderboard Preview */}
       <section>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-black text-navy uppercase">Top Players</h2>
+          <h2 className="text-lg font-black text-navy uppercase">{isDaily ? 'Today\'s Top Players' : 'Top Players'}</h2>
           <Link
             to={`/leaderboard?game=${game.id}`}
             className="text-primary text-xs font-bold no-underline hover:underline uppercase"
@@ -154,30 +160,30 @@ export default function GameDetail() {
           </Link>
         </div>
         <div className="brutalist-card overflow-hidden">
-          {leaderboard.length > 0 ? (
+          {loadingBoard ? (
+            <div className="px-4 py-8 text-center">
+              <RefreshCw className="w-6 h-6 text-navy/30 mx-auto mb-2 animate-spin" />
+              <p className="text-navy/50 text-xs font-bold uppercase">Loading scores...</p>
+            </div>
+          ) : board.error ? (
+            <div className="px-4 py-8 text-center" role="alert">
+              <p className="text-danger text-sm font-black">{board.error}</p>
+            </div>
+          ) : leaderboard.length > 0 ? (
             leaderboard.map((entry, i) => (
               <div
                 key={entry.username}
                 className="flex items-center gap-3 px-4 py-3 border-b-2 border-navy/10 last:border-0"
               >
-                <span
-                  className={`w-6 text-center text-sm font-black ${
-                    i === 0
-                      ? 'text-gold'
-                      : i === 1
-                      ? 'text-silver'
-                      : i === 2
-                      ? 'text-bronze'
-                      : 'text-navy/30'
-                  }`}
-                >
-                  {i + 1}
+                <span className={`w-6 text-center text-sm font-black ${rankColor(i)}`}>
+                  {entry.rank || i + 1}
                 </span>
-                <span className="text-sm text-navy font-bold flex-1">
+                <span className="text-lg">{entry.avatar || '🤖'}</span>
+                <span className="text-sm text-navy font-bold flex-1 min-w-0 truncate">
                   {entry.username}
                 </span>
                 <span className="text-sm font-black text-primary">
-                  {entry.score}
+                  {entry.score.toLocaleString()}
                 </span>
               </div>
             ))
