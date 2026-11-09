@@ -5,6 +5,8 @@ import { api } from '../lib/api'
 import { registerCreditConfirm } from '../lib/play'
 import { getGame } from '../lib/gameData'
 import { gameLimits } from '../lib/gameLimits'
+import { useMachine } from '../hooks/useMachine'
+import { creditDialogMachine } from '../machines/creditDialog.js'
 
 const CreditContext = createContext(null)
 const AUTOSPEND_KEY = 'gen_arcade_autospend'
@@ -24,7 +26,9 @@ function autospend() {
  */
 export function CreditProvider({ children }) {
   const [credits, setCredits] = useState(null)
-  const [prompt, setPrompt] = useState(null) // { gameId, reason, resolve }
+  const [prompt, setPrompt] = useState(null) // { gameId, reason, resolve }: data for the open dialog
+  const dialog = useMachine(creditDialogMachine) // see src/machines/creditDialog.js
+  const sendDialog = dialog.send
   const [dontAsk, setDontAsk] = useState(false)
   const creditsRef = useRef(null)
   const dialogRef = useRef(null)
@@ -64,9 +68,14 @@ export function CreditProvider({ children }) {
     return registerCreditConfirm(async ({ gameId, reason }) => {
       const c = await refresh()
       if (c && c.total > 0 && autospend()) return true
-      return new Promise((resolve) => setPrompt({ gameId, reason, resolve, empty: !c || c.total <= 0 }))
+      const empty = !c || c.total <= 0
+      return new Promise((resolve) => {
+        // Only one dialog at a time (play.js already asks once per game).
+        if (!sendDialog(empty ? 'ASK_EMPTY' : 'ASK')) return resolve(false)
+        setPrompt({ gameId, reason, resolve })
+      })
     })
-  }, [refresh])
+  }, [refresh, sendDialog])
 
   function answer(ok) {
     if (ok && dontAsk) {
@@ -76,7 +85,8 @@ export function CreditProvider({ children }) {
         // ignore
       }
     }
-    prompt?.resolve(ok)
+    if (!sendDialog(dialog.state === 'out-of-credits' ? 'CLOSE' : ok ? 'ACCEPT' : 'DECLINE')) return
+    prompt?.resolve(dialog.state === 'asking' && ok)
     setPrompt(null)
   }
 
@@ -85,16 +95,16 @@ export function CreditProvider({ children }) {
   return (
     <CreditContext.Provider value={{ credits, refresh }}>
       {children}
-      {prompt && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/60 px-4" role="dialog" aria-modal="true" aria-labelledby="credit-title">
+      {prompt && dialog.state !== 'closed' && (
+        <div {...dialog.attrs} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/60 px-4" role="dialog" aria-modal="true" aria-labelledby="credit-title">
           <div ref={dialogRef} tabIndex={-1} onKeyDown={(e) => { if (e.key === 'Escape') answer(false) }} className="brutalist-card bg-white p-6 max-w-sm w-full focus:outline-none">
             <div className="flex items-center gap-2 mb-3">
               <Coins className="w-5 h-5 text-navy" />
               <h2 id="credit-title" className="text-lg font-black text-navy uppercase">
-                {prompt.empty ? 'Out of credits' : prompt.reason === 'ticket_exhausted' ? 'Keep playing?' : 'Start game?'}
+                {dialog.state === 'out-of-credits' ? 'Out of credits' : prompt.reason === 'ticket_exhausted' ? 'Keep playing?' : 'Start game?'}
               </h2>
             </div>
-            {prompt.empty ? (
+            {dialog.state === 'out-of-credits' ? (
               <>
                 <p className="text-sm text-navy/70 font-medium mb-4">
                   You have no credits left. Free credits refill every day. You can also redeem a code.

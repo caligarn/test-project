@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { createPeer, makeRoomCode } from '../lib/peer'
+import { useMachine } from './useMachine'
+import { roomMachine } from '../machines/room.js'
 
 const MAX_PLAYERS = 8
 const HEARTBEAT_MS = 3000
@@ -36,7 +38,9 @@ function stablePlayerId() {
  *   room.setShared(nextOrUpdater)  // host only
  */
 export function usePeerRoom({ gameId, initialState = {}, onAction }) {
-  const [status, setStatus] = useState('idle')
+  const lifecycle = useMachine(roomMachine) // see src/machines/room.js
+  const status = lifecycle.state
+  const sendRoom = lifecycle.send
   const [error, setError] = useState(null)
   const [isHost, setIsHost] = useState(false)
   const [code, setCode] = useState(null)
@@ -146,7 +150,8 @@ export function usePeerRoom({ gameId, initialState = {}, onAction }) {
     ({ name, avatar } = {}, attempt = 0) => {
       reset()
       setError(null)
-      setStatus('connecting')
+      sendRoom('LEAVE') // from any state, then start fresh
+      sendRoom('CREATE')
       const roomCode = makeRoomCode()
       const peer = createPeer(`genarcade-${gameId}-${roomCode}`)
       peerRef.current = peer
@@ -155,7 +160,7 @@ export function usePeerRoom({ gameId, initialState = {}, onAction }) {
         setIsHost(true)
         setCode(roomCode)
         setPlayersBoth([{ id: myId, name: name || 'Host', avatar: avatar || '🎮', host: true, connected: true }])
-        setStatus('open')
+        sendRoom('OPENED')
       })
       const dropConnection = (conn) => {
         const info = connsRef.current.get(conn.connectionId)
@@ -224,7 +229,7 @@ export function usePeerRoom({ gameId, initialState = {}, onAction }) {
         }
         if (isHostRef.current && (err.type === 'peer-unavailable' || err.type === 'network')) return
         setError('Could not open a room. Check your connection and try again.')
-        setStatus('error')
+        sendRoom('FAILED')
       })
       peer.on('disconnected', () => {
         // Lost the signalling server; existing player connections keep working.
@@ -235,7 +240,7 @@ export function usePeerRoom({ gameId, initialState = {}, onAction }) {
         }
       })
     },
-    [gameId, myId, reset, broadcast, handleAction, setPlayersBoth]
+    [gameId, myId, reset, broadcast, handleAction, setPlayersBoth, sendRoom]
   )
 
   useEffect(() => {
@@ -246,7 +251,8 @@ export function usePeerRoom({ gameId, initialState = {}, onAction }) {
     (roomCode, { name, avatar } = {}) => {
       reset()
       setError(null)
-      setStatus('connecting')
+      sendRoom('LEAVE')
+      sendRoom('JOIN')
       const clean = String(roomCode || '').trim().toUpperCase()
       const peer = createPeer()
       peerRef.current = peer
@@ -258,13 +264,13 @@ export function usePeerRoom({ gameId, initialState = {}, onAction }) {
           if (heartbeatRef.current) clearInterval(heartbeatRef.current)
           heartbeatRef.current = null
           setError(opened ? 'The host left the room.' : 'Could not join that room.')
-          setStatus(opened ? 'closed' : 'error')
+          sendRoom(opened ? 'HOST_LEFT' : 'FAILED')
         }
         conn.on('open', () => {
           opened = true
           setCode(clean)
           conn.send({ type: 'hello', playerId: myId, name, avatar })
-          setStatus('open')
+          sendRoom('OPENED')
           lastSeenRef.current.set('host', Date.now())
           heartbeatRef.current = setInterval(() => {
             if (Date.now() - (lastSeenRef.current.get('host') || 0) > TIMEOUT_MS) {
@@ -289,7 +295,7 @@ export function usePeerRoom({ gameId, initialState = {}, onAction }) {
             setState(msg.state)
           } else if (msg?.type === 'refused') {
             setError(msg.reason || 'Could not join.')
-            setStatus('error')
+            sendRoom('FAILED')
           }
         })
         conn.on('close', () => {
@@ -298,10 +304,10 @@ export function usePeerRoom({ gameId, initialState = {}, onAction }) {
       })
       peer.on('error', (err) => {
         setError(err.type === 'peer-unavailable' ? `No room with code ${clean}. Check the code.` : 'Connection problem. Try again.')
-        setStatus('error')
+        sendRoom('FAILED')
       })
     },
-    [gameId, myId, reset, setPlayersBoth]
+    [gameId, myId, reset, setPlayersBoth, sendRoom]
   )
 
   const dispatch = useCallback(
@@ -319,8 +325,8 @@ export function usePeerRoom({ gameId, initialState = {}, onAction }) {
   const leave = useCallback(() => {
     reset()
     setError(null)
-    setStatus('idle')
-  }, [reset])
+    sendRoom('LEAVE')
+  }, [reset, sendRoom])
 
-  return { status, error, isHost, code, myId, players, state, create, join, leave, dispatch, setShared }
+  return { status, error, isHost, code, myId, players, state, create, join, leave, dispatch, setShared, attrs: lifecycle.attrs }
 }

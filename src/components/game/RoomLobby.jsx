@@ -39,7 +39,7 @@ export default function RoomLobby({ room, title = 'Party mode', minPlayers = 2, 
   if (room.status === 'idle' || room.status === 'error' || room.status === 'closed') {
     const playerName = name.trim() || 'Player'
     return (
-      <div className="brutalist-card p-5 flex flex-col gap-4">
+      <div className="brutalist-card p-5 flex flex-col gap-4" {...room.attrs}>
         <div className="flex items-center gap-2">
           <Users className="w-5 h-5 text-navy" />
           <h3 className="font-black text-navy uppercase">{title}</h3>
@@ -66,7 +66,7 @@ export default function RoomLobby({ room, title = 'Party mode', minPlayers = 2, 
 
   if (room.status === 'connecting') {
     return (
-      <div className="brutalist-card p-8 text-center">
+      <div className="brutalist-card p-8 text-center" {...room.attrs}>
         <p className="text-sm font-black text-navy/50 uppercase">Connecting...</p>
       </div>
     )
@@ -74,7 +74,7 @@ export default function RoomLobby({ room, title = 'Party mode', minPlayers = 2, 
 
   // status === 'open'
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" {...room.attrs}>
       <div className="brutalist-card p-5 flex flex-col sm:flex-row gap-5 items-center">
         {room.isHost && link && (
           <div className="bg-white p-2 border-2 border-navy shrink-0">

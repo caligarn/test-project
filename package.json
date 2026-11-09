@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "docs:machines": "node scripts/state-machines.mjs"
   },
   "dependencies": {
     "peerjs": "^1.5.5",

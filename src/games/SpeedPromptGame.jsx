@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { generateImage, judge } from '../lib/fal'
 import { useGameRounds } from '../hooks/useGameRounds'
+import { useMachine } from '../hooks/useMachine'
+import { speedPromptMachine } from '../machines/speedPrompt'
 import { useRoundTimer } from '../hooks/useRoundTimer'
 import { pickRandom, promptSimilarity } from '../lib/similarity'
 import StatsBar from '../components/game/StatsBar'
@@ -54,14 +56,14 @@ export default function SpeedPromptGame({ game }) {
     useGameRounds({ gameId: game.id, username, maxRounds: MAX_ROUNDS })
   const [concept, setConcept] = useState(null)
   const [prompt, setPrompt] = useState('')
-  const [phase, setPhase] = useState('idle') // idle, writing, generating, judging, result
+  const flow = useMachine(speedPromptMachine) // see src/machines/speedPrompt.js
+  const phase = flow.state
   const [imageUrl, setImageUrl] = useState(null)
   const [error, setError] = useState(null)
   const [roundScore, setRoundScore] = useState(0)
   const [breakdown, setBreakdown] = useState(null) // { score, bonus, secondsLeft, judged, comment }
   const [usedConcepts, setUsedConcepts] = useState([])
   const inputRef = useRef(null)
-  const submittingRef = useRef(false)
 
   // Auto-submit through a latest-render ref so the timer never submits a stale prompt
   const submitRef = useRef(() => {})
@@ -75,29 +77,27 @@ export default function SpeedPromptGame({ game }) {
     setImageUrl(null)
     setBreakdown(null)
     setError(null)
-    submittingRef.current = false
-    setPhase('writing')
+    flow.send('START')
     startTimer(TIME_LIMIT)
     setTimeout(() => inputRef.current?.focus(), 100)
   }
 
   const handleSubmit = async () => {
-    if (phase !== 'writing' || submittingRef.current) return
-    submittingRef.current = true
+    const finalPrompt = prompt.trim()
+    // The machine only accepts a submit while writing: a second tap or the
+    // timer firing after a manual submit is ignored here.
+    if (!flow.send(finalPrompt ? 'SUBMIT' : 'SUBMIT_EMPTY')) return
     const secondsLeft = timeLeft || 0
     stopTimer()
 
-    const finalPrompt = prompt.trim()
     if (!finalPrompt) {
       // No prompt written: 0 points
       setRoundScore(0)
       setBreakdown(null)
       recordScore(0)
-      setPhase('result')
       return
     }
 
-    setPhase('generating')
     const t = token()
     let url = null
     try {
@@ -110,8 +110,8 @@ export default function SpeedPromptGame({ game }) {
     if (!url) setError('The image could not be made, so this round is scored on your words.')
 
     let verdict = { score: null, comment: '' }
+    if (!flow.send(url ? 'DRAWN' : 'DRAW_FAILED')) return
     if (url) {
-      setPhase('judging')
       verdict = await judge('match-text', { imageUrl: url, text: concept.concept })
       if (isStale(t)) return
     }
@@ -123,7 +123,7 @@ export default function SpeedPromptGame({ game }) {
     setBreakdown({ score, bonus, secondsLeft, judged, comment: judged ? verdict.comment : '' })
     setRoundScore(pts)
     recordScore(pts)
-    setPhase('result')
+    flow.send('JUDGED')
   }
 
   // Keep the ref pointing at the latest handleSubmit so the timer's
@@ -136,7 +136,7 @@ export default function SpeedPromptGame({ game }) {
     stopTimer()
     nextRound()
     setError(null)
-    setPhase('idle')
+    flow.send(round >= MAX_ROUNDS ? 'FINISH' : 'NEXT')
   }
 
   const handleRestart = () => {
@@ -149,12 +149,12 @@ export default function SpeedPromptGame({ game }) {
     setRoundScore(0)
     setBreakdown(null)
     setUsedConcepts([])
-    setPhase('idle')
+    flow.send('RESTART')
   }
 
   if (gameOver) {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4" {...flow.attrs}>
         <GameOverCard
           emoji="⚡"
           title="Time's Up!"
@@ -170,7 +170,7 @@ export default function SpeedPromptGame({ game }) {
   const timerColor = (timeLeft ?? 0) <= 10 ? '#FF2D55' : (timeLeft ?? 0) <= 20 ? '#FFD600' : '#16a34a'
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" {...flow.attrs}>
       <StatsBar
         stats={[
           { label: 'Round', value: `${round}/${MAX_ROUNDS}` },

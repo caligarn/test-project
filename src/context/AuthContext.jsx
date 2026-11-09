@@ -2,6 +2,8 @@ import { createContext, useContext, useState, useEffect, useCallback } from 'rea
 import { api, getSessionToken, setSessionToken } from '../lib/api'
 import { getLegacyUser, removeLegacyUser } from '../lib/storage'
 import { creditsChanged } from '../lib/play'
+import { useMachine } from '../hooks/useMachine'
+import { sessionMachine } from '../machines/session.js'
 
 const AuthContext = createContext(null)
 
@@ -11,36 +13,63 @@ function errorMessage(err) {
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
-  const [loading, setLoading] = useState(() => Boolean(getSessionToken()))
+  // see src/machines/session.js; a saved token starts in "checking"
+  const session = useMachine(sessionMachine, { initial: getSessionToken() ? 'checking' : 'guest' })
+  const sendSession = session.send
+  const loading = session.state === 'checking'
+
+  // For tests and agents: <html data-session="guest | checking | signed-in">
+  useEffect(() => {
+    document.documentElement.dataset.session = session.state
+  }, [session.state])
 
   const refreshUser = useCallback(async () => {
     if (!getSessionToken()) {
       setUser(null)
-      setLoading(false)
       return null
     }
     try {
       const { user: u } = await api('/auth/me')
       setUser(u)
+      sendSession('SIGNED_IN')
       return u
     } catch (err) {
       if (err.status === 401) {
         setSessionToken(null)
         setUser(null)
       }
+      // Same as before: on a network error the page acts as a guest, and the
+      // saved login is kept for the next visit.
+      sendSession('SIGNED_OUT')
       return null
-    } finally {
-      setLoading(false)
     }
-  }, [])
+  }, [sendSession])
 
+  // On load: check a saved login with the server (guests skip this).
   useEffect(() => {
-    refreshUser()
-  }, [refreshUser])
+    if (!getSessionToken()) return
+    let active = true
+    api('/auth/me').then(
+      ({ user: u }) => {
+        if (!active) return
+        setUser(u)
+        sendSession('SIGNED_IN')
+      },
+      (err) => {
+        if (!active) return
+        if (err.status === 401) setSessionToken(null)
+        sendSession('SIGNED_OUT')
+      }
+    )
+    return () => {
+      active = false
+    }
+  }, [sendSession])
 
   function finish({ token, user: u }) {
     setSessionToken(token)
     setUser(u)
+    sendSession('SIGNED_IN')
     creditsChanged()
     return { success: true, user: u }
   }
@@ -75,6 +104,7 @@ export function AuthProvider({ children }) {
   function logout() {
     setSessionToken(null)
     setUser(null)
+    sendSession('SIGNED_OUT')
     creditsChanged()
   }
 
@@ -89,7 +119,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, refreshUser, updateAvatar }}>
+    <AuthContext.Provider value={{ user, loading, status: session.state, login, signup, logout, refreshUser, updateAvatar }}>
       {children}
     </AuthContext.Provider>
   )

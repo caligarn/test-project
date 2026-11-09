@@ -59,6 +59,15 @@ src/hooks/usePeerRoom.js  <-- PeerJS (WebRTC) -->  other players' browsers
   simulated judge, and the site shows a banner. Good for testing everything else
   without spending credit.
 
+## Game flows (state machines)
+
+Every multi-step flow (each game, the party room, the credit dialog, the login
+session) is a small state machine in `src/machines/`, drawn in
+[docs/state-machines.md](docs/state-machines.md). Components run them with
+`useMachine`, and each game root carries `data-machine` and `data-state`
+attributes, so tests and browser agents can wait for a state. See
+[AGENTS.md](AGENTS.md) for the rules.
+
 ## Run locally
 
 ```bash
@@ -75,7 +84,8 @@ To test party modes on one machine, two browser windows (or a normal and a
 private window) can join the same room.
 
 ```bash
-npm test         # server and logic tests (vitest)
+npm test         # server, logic, and state machine tests (vitest)
+npm run docs:machines   # redraw docs/state-machines.md after changing a machine
 npm run lint
 npm run build
 ```
