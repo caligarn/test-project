@@ -1,7 +1,7 @@
 // All API routes. One router so Vercel deploys a single function
 // (the Hobby plan limits the number of functions) and Vite dev reuses it.
 
-import { getConfig } from './config.js'
+import { getConfig, isProduction } from './config.js'
 import { getStore, pairsToObject } from './store.js'
 import { HttpError, sendJson, readJson, requireText, getIp, today } from './http.js'
 import { textToImage, editImage, sketchToImage, realtimeToken, isAllowedImageUrl } from './fal.js'
@@ -74,6 +74,9 @@ const handlers = {
       ok: true,
       mock: cfg.mock,
       store: getStore().kind,
+      // In production the memory store forgets everything between requests.
+      dataWarning: isProduction() && getStore().kind === 'memory',
+      accounts: Boolean(cfg.sessionSecret),
       falConfigured: Boolean(cfg.falKey),
       realtime: !cfg.mock && Boolean(cfg.falKey),
       realtimeModel: cfg.realtimeModel,

@@ -55,8 +55,9 @@ src/hooks/usePeerRoom.js  <-- PeerJS (WebRTC) -->  other players' browsers
 - **Leaderboards, galleries, votes, and the Infini-Map are shared** by all players.
 - **Party modes** use a host-authoritative room over PeerJS. The host's browser
   keeps the game state. Each player makes their own AI calls with their own credit.
-- **Mock mode:** without `FAL_KEY` in development, the server returns fake SVG
-  images and a fake judge, so you can build and test without spending credit.
+- **Demo mode:** without `FAL_KEY`, the server returns placeholder images and a
+  simulated judge, and the site shows a banner. Good for testing everything else
+  without spending credit.
 
 ## Run locally
 
@@ -81,12 +82,16 @@ npm run build
 
 ## Deploy (Vercel)
 
-1. In Vercel, add **Upstash for Redis** from the Marketplace to the project. It sets
-   `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
-2. Set `FAL_KEY` and `SESSION_SECRET` (see `.env.example`). Optional: `REDEEM_CODES`,
-   `FREE_DAILY_CREDITS`, `DAILY_GENERATION_CAP`, Stripe links.
-3. Deploy. `vercel.json` sends every `/api/*` path to the single function
-   `api/router.js` and every other path to the app.
+**Minimum:** in Vercel, add **Upstash for Redis** from the Marketplace to the
+project (it sets `KV_REST_API_URL` and `KV_REST_API_TOKEN`), then redeploy. That
+is enough for logins, credits, leaderboards, galleries, and party modes.
+
+**Real AI images:** also set `FAL_KEY`. Without it the site runs in **demo mode**:
+images are placeholders that show the prompt as text, the AI judge is simulated,
+and a banner at the top says so.
+
+Optional settings are in `.env.example`. `vercel.json` sends every `/api/*` path
+to the single function `api/router.js` and every other path to the app.
 
 Check `/api/health` after a deploy: it shows if the key and the store are set.
 

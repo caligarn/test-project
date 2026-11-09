@@ -30,7 +30,7 @@ export async function verifyPassword(password, stored) {
 
 function secret() {
   const s = getConfig().sessionSecret
-  if (!s) throw new HttpError(503, 'not_configured', 'Accounts are not configured on the server (SESSION_SECRET is missing).')
+  if (!s) throw new HttpError(503, 'not_configured', 'Accounts are not set up on the server yet: add Upstash for Redis (or SESSION_SECRET) in Vercel.')
   return s
 }
 

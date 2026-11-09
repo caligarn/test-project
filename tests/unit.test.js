@@ -117,3 +117,35 @@ describe('prompt similarity', () => {
     expect(promptSimilarityDetail('snowy fox', 'a red fox in snow').matchedWords.sort()).toEqual(['fox', 'snow'])
   })
 })
+
+describe('config defaults for a deploy without fal.ai', () => {
+  const keys = ['FAL_KEY', 'FAL_MOCK', 'SESSION_SECRET', 'KV_REST_API_TOKEN', 'UPSTASH_REDIS_REST_TOKEN', 'VERCEL']
+  let saved
+  const snapshot = () => { saved = Object.fromEntries(keys.map((k) => [k, process.env[k]])); keys.forEach((k) => delete process.env[k]) }
+  const restore = () => keys.forEach((k) => (saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k])))
+
+  it('uses demo images in production when no key is set', async () => {
+    snapshot()
+    try {
+      const { getConfig } = await import('../server/config.js')
+      process.env.VERCEL = '1'
+      expect(getConfig().mock).toBe(true)
+      process.env.FAL_KEY = 'k'
+      expect(getConfig().mock).toBe(false)
+    } finally { restore() }
+  })
+  it('derives the session secret from the Redis token, and has none in production without either', async () => {
+    snapshot()
+    try {
+      const { getConfig } = await import('../server/config.js')
+      process.env.VERCEL = '1'
+      expect(getConfig().sessionSecret).toBe('')
+      process.env.KV_REST_API_TOKEN = 'redis-token'
+      const derived = getConfig().sessionSecret
+      expect(derived).toMatch(/^[a-f0-9]{64}$/)
+      expect(derived).not.toContain('redis-token')
+      process.env.SESSION_SECRET = 'explicit'
+      expect(getConfig().sessionSecret).toBe('explicit')
+    } finally { restore() }
+  })
+})
