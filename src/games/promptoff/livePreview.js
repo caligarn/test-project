@@ -1,6 +1,7 @@
 // Live preview engine (no React). One instance per match.
 import { connectRealtime, generateImage } from '../../lib/fal'
 import { getHealth } from '../../lib/api'
+import { getTicket } from '../../lib/play'
 
 // With the realtime socket, fal throttles frames itself, so we send often.
 // Without it (mock mode, or realtime failed) every preview is one /api call,
@@ -9,6 +10,9 @@ const REALTIME_INTERVAL_MS = 250
 const FALLBACK_INTERVAL_MS = 1600
 const FIRST_DELAY_MS = 300 // gather a few keystrokes before a call
 const RATE_LIMIT_PAUSE_MS = 6000
+// Before this device has a play ticket, the first call opens the credit
+// modal. Wait for a pause in typing/drawing so it does not pop up mid-word.
+const FIRST_CALL_IDLE_MS = 900
 
 /**
  * poke() whenever the input changes. When it is time to generate, getInput()
@@ -61,9 +65,12 @@ export function createLivePreview({ getInput, onImage, onCreditDeclined }) {
     if (!closed && h.realtime) paced = false
   })
 
-  function schedule() {
-    if (closed || timer || !dirty || blocked) return
-    const wait = Math.max(FIRST_DELAY_MS, nextAt - Date.now())
+  function schedule(restartIdle = false) {
+    if (closed || !dirty || blocked) return
+    const waitForPause = !getTicket()
+    if (timer && !(waitForPause && restartIdle)) return
+    if (timer) clearTimeout(timer)
+    const wait = Math.max(waitForPause ? FIRST_CALL_IDLE_MS : FIRST_DELAY_MS, nextAt - Date.now())
     timer = setTimeout(fire, wait)
   }
 
@@ -108,7 +115,7 @@ export function createLivePreview({ getInput, onImage, onCreditDeclined }) {
   return {
     poke() {
       dirty = true
-      schedule()
+      schedule(true)
     },
     resume() {
       blocked = false

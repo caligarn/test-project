@@ -5,11 +5,12 @@ import { useState, useRef, useEffect, useEffectEvent, useMemo } from 'react'
 import { generateFromSketch, generateImage } from '../lib/fal'
 import { addScore } from '../lib/storage'
 import { useAuth } from '../context/AuthContext'
-import { COUNTDOWN_SECONDS, FINAL_WAIT_MS, GAME_DURATION, matchResult, newEndsAt, pickPrompt } from './promptoff/constants'
+import { FINAL_WAIT_MS, matchResult, newEndsAt, pickPrompt } from './promptoff/constants'
 import { useDuelConnection } from './promptoff/useDuelConnection'
 import { useVoteRoom } from './promptoff/useVoteRoom'
 import { useLiveGeneration } from './promptoff/useLiveGeneration'
 import { useLatestRef } from './promptoff/useLatestRef'
+import { useMatchClock } from './promptoff/useMatchClock'
 import { LobbyView, WaitingView, CountdownView } from './promptoff/RoomViews'
 import PlayingView from './promptoff/PlayingView'
 import { GeneratingView, VotingView } from './promptoff/ResultViews'
@@ -29,8 +30,6 @@ export default function PromptOffGame({ game }) {
   const [matchId, setMatchId] = useState(0)
   const [targetPrompt, setTargetPrompt] = useState('')
   const [endsAt, setEndsAt] = useState(0)
-  const [countdownNum, setCountdownNum] = useState(COUNTDOWN_SECONDS)
-  const [timeLeft, setTimeLeft] = useState(GAME_DURATION)
   const [myPrompt, setMyPrompt] = useState('')
   const [myLiveUrl, setMyLiveUrl] = useState(null)
   const [opponentLiveUrl, setOpponentLiveUrl] = useState(null)
@@ -130,8 +129,6 @@ export default function PromptOffGame({ game }) {
     setMatchId((m) => m + 1)
     setTargetPrompt(prompt)
     setEndsAt(matchEndsAt)
-    setCountdownNum(COUNTDOWN_SECONDS)
-    setTimeLeft(GAME_DURATION)
     setPhase('countdown')
   }
 
@@ -206,25 +203,12 @@ export default function PromptOffGame({ game }) {
     if (myPrompt.trim()) submitFinal(myPrompt.trim())
   }
 
-  // Countdown, then the round clock. Both follow the host's endsAt.
-  const onTimeUp = useEffectEvent(() => submitFinal(myPrompt.trim() || 'abstract art'))
-  useEffect(() => {
-    if (phase !== 'countdown' && phase !== 'playing') return
-    const tick = () => {
-      const now = Date.now()
-      if (phase === 'countdown') {
-        const left = Math.ceil((endsAt - GAME_DURATION * 1000 - now) / 1000)
-        setCountdownNum(Math.max(0, left))
-        if (left <= 0) setPhase('playing')
-        return
-      }
-      const left = Math.max(0, Math.ceil((endsAt - now) / 1000))
-      setTimeLeft(left)
-      if (left <= 0) onTimeUp()
-    }
-    const interval = setInterval(tick, 250)
-    return () => clearInterval(interval)
-  }, [phase, endsAt])
+  const clock = useMatchClock({
+    phase,
+    endsAt,
+    onCountdownDone: () => setPhase('playing'),
+    onTimeUp: () => submitFinal(myPrompt.trim() || 'abstract art'),
+  })
 
   // Move to voting when both finals are in, or after FINAL_WAIT_MS.
   const bothFinal = myFinal !== null && opponentFinal !== null
@@ -281,13 +265,13 @@ export default function PromptOffGame({ game }) {
     )
   }
 
-  if (phase === 'countdown') return <CountdownView count={countdownNum} />
+  if (phase === 'countdown') return <CountdownView count={clock.countdown} />
 
   if (phase === 'playing') {
     return (
       <PlayingView
         targetPrompt={targetPrompt}
-        timeLeft={timeLeft}
+        timeLeft={clock.timeLeft}
         username={username}
         opponentName={opponentName}
         myLiveUrl={myLiveUrl}

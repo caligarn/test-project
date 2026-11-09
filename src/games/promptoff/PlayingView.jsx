@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react'
 import { Clock } from 'lucide-react'
 import ImageBox from './ImageBox'
 import SketchPad from './SketchPad'
@@ -18,6 +19,15 @@ export default function PlayingView({
   targetPrompt, timeLeft, username, opponentName, myLiveUrl, opponentLiveUrl,
   prompt, onPromptChange, canvasRef, onStroke, onClear, onSubmit, creditDeclined, onRetryCredit,
 }) {
+  // The credit modal takes focus. When the first preview arrives, give it back
+  // to the prompt box if the player was typing.
+  const promptRef = useRef(null)
+  const typingRef = useRef(false)
+  const hasPreview = !!myLiveUrl
+  useEffect(() => {
+    if (hasPreview && typingRef.current && document.activeElement === document.body) promptRef.current?.focus()
+  }, [hasPreview])
+
   return (
     <div className="flex flex-col gap-3">
       <div className="brutalist-card p-4 flex items-center justify-between gap-3">
@@ -45,8 +55,12 @@ export default function PlayingView({
             <label htmlFor="promptoff-prompt" className="block text-xs font-black text-navy uppercase mb-1">Your Prompt</label>
             <textarea
               id="promptoff-prompt"
+              ref={promptRef}
               value={prompt}
-              onChange={(e) => onPromptChange(e.target.value)}
+              onChange={(e) => {
+                typingRef.current = true
+                onPromptChange(e.target.value)
+              }}
               placeholder="Start typing... the AI draws as you type!"
               rows={3}
               maxLength={500}
@@ -55,7 +69,14 @@ export default function PlayingView({
               autoFocus
             />
           </div>
-          <SketchPad canvasRef={canvasRef} onStroke={onStroke} onClear={onClear} />
+          <SketchPad
+            canvasRef={canvasRef}
+            onStroke={() => {
+              typingRef.current = false
+              onStroke()
+            }}
+            onClear={onClear}
+          />
         </div>
 
         <div className="flex flex-col gap-3">
