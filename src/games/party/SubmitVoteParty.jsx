@@ -190,8 +190,8 @@ export default function SubmitVoteParty({
   const roundLabel = s.phase === 'final' ? 'Final' : `Round ${s.round}/${s.rounds}`
 
   const statusOf = (p) => {
-    if (s.phase === 'submit') return s.submitted.includes(p.id) ? '✓' : '...'
-    if (s.phase === 'vote') return s.voted.includes(p.id) ? '✓' : '...'
+    if (s.phase === 'submit') return s.submitted.includes(p.id) ? '✓' : '⏳'
+    if (s.phase === 'vote') return s.voted.includes(p.id) ? '✓' : '⏳'
     return null
   }
 
@@ -255,7 +255,7 @@ export default function SubmitVoteParty({
               {iVoted ? `Vote in! Waiting for others (${s.voted.length})` : 'Vote for your favorite (not your own)'}
             </p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3">
             {s.entries.map((e) => {
               const isMine = e.id === myEntryId
               const picked = myVotes[key] === e.id
@@ -288,7 +288,7 @@ export default function SubmitVoteParty({
           <div className="brutalist-card p-4">
             <h3 className="font-black text-navy uppercase text-sm mb-3">Round {s.round} results</h3>
             {s.results.length === 0 && <p className="text-sm text-navy/50 font-medium">Nobody submitted this round.</p>}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3">
               {s.results.map((r, i) => {
                 const p = nameOf(r.playerId)
                 return (

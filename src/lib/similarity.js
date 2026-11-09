@@ -1,6 +1,6 @@
 // Shared prompt/text similarity utilities.
-// Replaces the divergent word-overlap scorers previously copy-pasted into
-// PromptGuesser, PixelDuel, and Telephone.
+// Shared prompt/text similarity utilities, used by the games and the
+// server (Daily Challenge scoring).
 
 const STOP_WORDS = new Set([
   'a', 'an', 'the', 'of', 'on', 'in', 'at', 'to', 'with', 'and', 'or',

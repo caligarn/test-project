@@ -547,7 +547,7 @@ export default function InfinimapGame({ game }) {
 
       {/* Prompt modal */}
       {pending && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-3 sm:p-4" onClick={() => setPending(null)}>
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-3 sm:p-4" onClick={() => setPending(null)}>
           <div className="brutalist-card p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-black text-navy uppercase mb-1">Paint tile {pending.x}, {pending.y}</h3>
             {pendingNeighbours.length > 0 ? (

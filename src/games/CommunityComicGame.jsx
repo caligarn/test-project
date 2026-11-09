@@ -292,7 +292,7 @@ export default function CommunityComicGame({ game }) {
 
       {/* Zoom modal */}
       {zoomed && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setZoom(null)}>
+        <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4" onClick={() => setZoom(null)}>
           <div className="max-w-lg w-full bg-white" style={{ border: '4px solid #1A1A2E' }} onClick={(e) => e.stopPropagation()}>
             <GameImage eager src={zoomed.imageUrl} alt="" className="w-full" style={{ display: 'block' }} />
             <div className="flex items-start justify-between gap-2" style={{ padding: '12px 16px', borderTop: '3px solid #1A1A2E' }}>

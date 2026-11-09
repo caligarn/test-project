@@ -15,6 +15,7 @@ import {
 import { GAME_IDS, gameLimits } from '../src/lib/gameLimits.js'
 import { dailyPrompts, DAILY_ROUNDS, hashString } from './dailyPrompts.js'
 import { promptSimilarityDetail } from '../src/lib/similarity.js'
+import { handleStripeWebhook } from './stripe.js'
 
 const GALLERY_CAP = 300
 const CLIENT_ID_RE = /^[a-zA-Z0-9-]{8,64}$/
@@ -120,6 +121,9 @@ const handlers = {
   },
 
   'POST /play/start': async ({ req, body }) => startPlay(req, body.gameId),
+
+  // Stripe calls this after a credit pack payment (see server/stripe.js).
+  'POST /stripe/webhook': async ({ body }) => handleStripeWebhook(body),
 
   // --- AI calls (each needs a play ticket) --------------------------------
   'POST /generate': async ({ req, body }) => {
@@ -327,12 +331,7 @@ const handlers = {
       ])
       images = pairsToObject(await store.cmd('HGETALL', key))
     }
-    let played = {}
-    try {
-      const who = dailyWho(req)
-      const raw = pairsToObject(await store.cmd('HGETALL', `daily:${date}:${who}`))
-      played = Object.fromEntries(Object.entries(raw).map(([i, v]) => [i, JSON.parse(v)]))
-    } catch { /* anonymous read */ }
+    const played = await syncDaily(req, date)
     return {
       date,
       rounds: prompts.map((_, i) => ({ index: i, imageUrl: images[i] })),
@@ -346,32 +345,69 @@ const handlers = {
     if (!Number.isInteger(index) || index < 0 || index >= DAILY_ROUNDS) throw new HttpError(400, 'bad_request', 'Bad round.')
     const guess = requireText(body.guess, 'guess', { max: 300 })
     await limitAction(req, 'daily', 30)
-    const who = dailyWho(req)
     const prompt = dailyPrompts(date)[index]
+    const played = await syncDaily(req, date)
+    if (played[index]) return { ...played[index], alreadyPlayed: true }
     const { score, matchedWords } = promptSimilarityDetail(guess, prompt)
     const result = { score, prompt, matchedWords, guess }
     const store = getStore()
-    const fresh = await store.cmd('HSETNX', `daily:${date}:${who}`, String(index), JSON.stringify(result))
-    if (!fresh) {
-      const existing = JSON.parse(await store.cmd('HGET', `daily:${date}:${who}`, String(index)))
-      return { ...existing, alreadyPlayed: true }
-    }
-    await store.cmd('EXPIRE', `daily:${date}:${who}`, String(3 * 86400))
-    const all = pairsToObject(await store.cmd('HGETALL', `daily:${date}:${who}`))
-    const done = Object.keys(all).length === DAILY_ROUNDS
-    const total = Object.values(all).reduce((sum, v) => sum + JSON.parse(v).score, 0)
-    const username = sessionUser(req)
-    if (done && username) await store.cmd('ZADD', `lb:daily:${date}`, String(total), username)
+    const keys = dailyWho(req).map((who) => `daily:${date}:${who}`)
+    // HSETNX on the main key wins a race between two tabs.
+    const fresh = await store.cmd('HSETNX', keys[0], String(index), JSON.stringify(result))
+    if (!fresh) return { ...JSON.parse(await store.cmd('HGET', keys[0], String(index))), alreadyPlayed: true }
+    await store.pipeline(keys.flatMap((k, i) => [
+      ...(i > 0 ? [['HSETNX', k, String(index), JSON.stringify(result)]] : []),
+      ['EXPIRE', k, String(3 * 86400)],
+    ]))
+    const { done, total } = await finishDaily(req, date)
     return { ...result, done, total }
   },
 }
 
+/**
+ * Daily identities, main one first: the account when logged in, and the
+ * browser's client id. Results are shared across both, so a guest who saw
+ * the answers cannot log in and play the same day again.
+ */
 function dailyWho(req) {
+  const ids = []
   const user = sessionUser(req)
-  if (user) return `u:${user.toLowerCase()}`
+  if (user) ids.push(`u:${user.toLowerCase()}`)
   const cid = String(req.headers['x-client-id'] || '')
-  if (CLIENT_ID_RE.test(cid)) return `c:${cid}`
-  return `ip:${getIp(req)}`
+  if (CLIENT_ID_RE.test(cid)) ids.push(`c:${cid}`)
+  if (ids.length === 0) ids.push(`ip:${getIp(req)}`)
+  return ids
+}
+
+/** Merge today's results from all identities into each of them; returns { index: result }. */
+async function syncDaily(req, date) {
+  const store = getStore()
+  const keys = dailyWho(req).map((who) => `daily:${date}:${who}`)
+  const raws = await store.pipeline(keys.map((k) => ['HGETALL', k]))
+  const merged = {}
+  for (const raw of [...raws].reverse()) Object.assign(merged, pairsToObject(raw))
+  const missing = []
+  keys.forEach((k, i) => {
+    const have = pairsToObject(raws[i])
+    for (const [idx, v] of Object.entries(merged)) if (!have[idx]) missing.push(['HSETNX', k, idx, v], ['EXPIRE', k, String(3 * 86400)])
+  })
+  if (missing.length) {
+    await store.pipeline(missing)
+    await finishDaily(req, date)
+  }
+  return Object.fromEntries(Object.entries(merged).map(([i, v]) => [i, JSON.parse(v)]))
+}
+
+/** Post the total to today's board when a logged-in player has all rounds. */
+async function finishDaily(req, date) {
+  const store = getStore()
+  const main = `daily:${date}:${dailyWho(req)[0]}`
+  const all = pairsToObject(await store.cmd('HGETALL', main))
+  const done = Object.keys(all).length === DAILY_ROUNDS
+  const total = Object.values(all).reduce((sum, v) => sum + JSON.parse(v).score, 0)
+  const username = sessionUser(req)
+  if (done && username) await store.cmd('ZADD', `lb:daily:${date}`, String(total), username)
+  return { done, total }
 }
 
 // ---------------------------------------------------------------------------

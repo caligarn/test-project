@@ -52,6 +52,15 @@ async function copyText(text) {
   }
 }
 
+/** "2026-11-09" -> "Nov 9" (the daily date is a UTC day). */
+function shortDate(date) {
+  try {
+    return new Date(`${date}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+  } catch {
+    return date
+  }
+}
+
 const firstUnplayed = (rounds, played) => {
   const next = rounds.find((r) => !played[r.index])
   return next ? next.index : null
@@ -174,7 +183,7 @@ export default function DailyChallengeGame() {
       <div className="grid grid-cols-3 gap-3">
         <div className="brutalist-card p-3 sm:p-4 text-center">
           <p className="text-xs font-bold uppercase text-navy/40">Date</p>
-          <p className="text-sm sm:text-xl font-black text-navy">{data.date}</p>
+          <p className="text-xl sm:text-3xl font-black text-navy whitespace-nowrap" title={data.date}>{shortDate(data.date)}</p>
         </div>
         <div className="brutalist-card p-3 sm:p-4 text-center">
           <p className="text-xs font-bold uppercase text-navy/40">Played</p>

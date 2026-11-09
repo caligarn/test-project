@@ -79,7 +79,7 @@ export function CreditProvider({ children }) {
     <CreditContext.Provider value={{ credits, refresh }}>
       {children}
       {prompt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/60 px-4" role="dialog" aria-modal="true" aria-labelledby="credit-title">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/60 px-4" role="dialog" aria-modal="true" aria-labelledby="credit-title">
           <div className="brutalist-card bg-white p-6 max-w-sm w-full">
             <div className="flex items-center gap-2 mb-3">
               <Coins className="w-5 h-5 text-navy" />

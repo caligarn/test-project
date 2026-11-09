@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import http from 'node:http'
 import { handleApi } from '../server/routes.js'
 import { setStore, createMemoryStore } from '../server/store.js'
@@ -184,6 +184,19 @@ describe('daily challenge', () => {
     expect(again.body.alreadyPlayed).toBe(true)
     expect(again.body.score).toBe(g.body.score)
   })
+  it('a guest who saw the answers cannot log in and replay', async () => {
+    const cid = 'client-cccc-3333'
+    for (let i = 0; i < 5; i++) await call('POST', '/daily/guess', { clientId: cid, body: { index: i, guess: 'wrong guess' } })
+    const s = await call('POST', '/auth/signup', { body: { username: 'mallory', password: 'secret1' } })
+    const replay = await call('POST', '/daily/guess', { clientId: cid, token: s.body.token, body: { index: 0, guess: 'the perfect answer' } })
+    expect(replay.body.alreadyPlayed).toBe(true)
+    expect(replay.body.guess).toBe('wrong guess')
+    const d = await call('GET', '/daily', { clientId: cid, token: s.body.token })
+    expect(Object.keys(d.body.played)).toHaveLength(5)
+    // The honest guest score still reaches the board once logged in
+    const lb = await call('GET', '/leaderboard?game=daily')
+    expect(lb.body.rows.map((r) => r.username)).toContain('mallory')
+  })
   it('posts the total to the daily board for logged-in players', async () => {
     const s = await call('POST', '/auth/signup', { body: { username: 'erin', password: 'secret1' } })
     let last
@@ -191,5 +204,36 @@ describe('daily challenge', () => {
     expect(last.body.done).toBe(true)
     const lb = await call('GET', '/leaderboard?game=daily')
     expect(lb.body.rows[0].username).toBe('erin')
+  })
+})
+
+describe('stripe credit packs', () => {
+  it('credits a verified payment once, and ignores forged or unknown events', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_x'
+    process.env.STRIPE_CREDITS_BY_LINK = 'plink_pop:50'
+    const s = await call('POST', '/auth/signup', { body: { username: 'payer', password: 'secret1' } })
+    const realFetch = globalThis.fetch
+    const events = {
+      evt_good: { type: 'checkout.session.completed', data: { object: { id: 'cs_1', payment_status: 'paid', payment_link: 'plink_pop', client_reference_id: 'payer' } } },
+    }
+    vi.stubGlobal('fetch', async (url, init) => {
+      if (String(url).startsWith('https://api.stripe.com/v1/events/')) {
+        const ev = events[String(url).split('/').pop()]
+        return { ok: Boolean(ev), status: ev ? 200 : 404, json: async () => ev }
+      }
+      return realFetch(url, init)
+    })
+    try {
+      const ok = await call('POST', '/stripe/webhook', { body: { id: 'evt_good', type: 'checkout.session.completed', data: { object: { client_reference_id: 'someone_else' } } } })
+      expect(ok.body.credited).toBe(50)
+      expect((await call('POST', '/stripe/webhook', { body: { id: 'evt_good' } })).body.duplicate).toBe(true)
+      expect((await call('POST', '/stripe/webhook', { body: { id: 'evt_forged' } })).status).toBe(400)
+      const credits = await call('GET', '/credits', { token: s.body.token })
+      expect(credits.body.paid).toBe(50)
+    } finally {
+      vi.unstubAllGlobals()
+      delete process.env.STRIPE_SECRET_KEY
+      delete process.env.STRIPE_CREDITS_BY_LINK
+    }
   })
 })

@@ -57,6 +57,11 @@ export const POINTS = { win: 200, tie: 100, loss: 50 }
 export const gamePeerId = (code) => `promptoff-${code}`
 export const votePeerId = (code) => `promptoff-vote-${code}`
 
+/** When a match that starts now ends (countdown + round), as ms epoch. */
+export function newEndsAt() {
+  return Date.now() + (COUNTDOWN_SECONDS + GAME_DURATION) * 1000
+}
+
 export function pickPrompt() {
   return PROMPTS[Math.floor(Math.random() * PROMPTS.length)]
 }

@@ -1,1087 +1,333 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import Peer from 'peerjs'
-import { generateFromSketch, connectRealtime, generateImage } from '../lib/fal'
+// Prompt Off: two players race to recreate a theme with live AI images,
+// then the audience votes from their phones (VotePage at /vote/:code).
+// Modules live in ./promptoff/ (protocol notes in constants.js).
+import { useState, useRef, useEffect, useEffectEvent, useMemo } from 'react'
+import { generateFromSketch, generateImage } from '../lib/fal'
 import { addScore } from '../lib/storage'
 import { useAuth } from '../context/AuthContext'
-import { Copy, Check, Trash2, Clock, Trophy } from 'lucide-react'
-import { QRCodeSVG } from 'qrcode.react'
+import { COUNTDOWN_SECONDS, FINAL_WAIT_MS, GAME_DURATION, matchResult, newEndsAt, pickPrompt } from './promptoff/constants'
+import { useDuelConnection } from './promptoff/useDuelConnection'
+import { useVoteRoom } from './promptoff/useVoteRoom'
+import { useLiveGeneration } from './promptoff/useLiveGeneration'
+import { useLatestRef } from './promptoff/useLatestRef'
+import { LobbyView, WaitingView, CountdownView } from './promptoff/RoomViews'
+import PlayingView from './promptoff/PlayingView'
+import { GeneratingView, VotingView } from './promptoff/ResultViews'
 
-const PROMPTS = [
-  'A dragon sleeping on a pile of gold coins in a cave',
-  'An astronaut riding a horse on the surface of Mars',
-  'A cat wearing a top hat having tea in a garden',
-  'A robot painting a sunset at the beach with an easel',
-  'A treehouse in the clouds with a rope ladder',
-  'A penguin surfing a giant wave at sunset',
-  'A wizard casting colorful spells in a dusty library',
-  'A steampunk train flying through a stormy sky',
-  'A mermaid playing electric guitar underwater',
-  'A samurai standing in a cherry blossom storm',
-  'A dinosaur wearing sunglasses at a pool party',
-  'A pirate ship made of candy sailing on chocolate seas',
-  'An owl professor teaching math in a forest classroom',
-  'A fox riding a bicycle through a medieval village',
-  'A haunted lighthouse on a cliff during a thunderstorm',
-  'A corgi astronaut floating in a space station',
-  'A giant octopus wrapping around a skyscraper at night',
-  'A cozy cabin in the woods during a heavy snowfall',
-  'A knight jousting a windmill in a sunflower field',
-  'A raccoon DJ playing turntables at a rooftop party',
-]
-
-const BRUSH_COLORS = ['#1A1A2E', '#FF2D55', '#FF6B35', '#FFD600', '#C8FF00', '#00D4FF', '#8B5CF6', '#FFFFFF']
-const BRUSH_SIZES = [3, 8, 16]
-const GAME_DURATION = 60
-const COUNTDOWN_SECONDS = 3
-
-function generateRoomCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  let code = ''
-  for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)]
-  return code
-}
+const NO_VOTES = { A: 0, B: 0 }
 
 export default function PromptOffGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
 
-  // Connection
+  // lobby | waiting | countdown | playing | generating | voting
   const [phase, setPhase] = useState('lobby')
   const [isHost, setIsHost] = useState(false)
-  const [roomCode, setRoomCode] = useState('')
-  const [joinCode, setJoinCode] = useState('')
-  const [connected, setConnected] = useState(false)
-  const [error, setError] = useState(null)
   const [opponentName, setOpponentName] = useState('Opponent')
-  const [copied, setCopied] = useState(false)
 
-  // Game
+  // One match (a rematch starts a new one)
+  const [matchId, setMatchId] = useState(0)
   const [targetPrompt, setTargetPrompt] = useState('')
+  const [endsAt, setEndsAt] = useState(0)
+  const [countdownNum, setCountdownNum] = useState(COUNTDOWN_SECONDS)
   const [timeLeft, setTimeLeft] = useState(GAME_DURATION)
-  const [countdownNum, setCountdownNum] = useState(3)
-  const [myPromptText, setMyPromptText] = useState('')
+  const [myPrompt, setMyPrompt] = useState('')
   const [myLiveUrl, setMyLiveUrl] = useState(null)
   const [opponentLiveUrl, setOpponentLiveUrl] = useState(null)
-  const [myFinalUrl, setMyFinalUrl] = useState(null)
   const [myFinalPrompt, setMyFinalPrompt] = useState('')
-  const [opponentFinalUrl, setOpponentFinalUrl] = useState(null)
-  const [opponentFinalPrompt, setOpponentFinalPrompt] = useState('')
+  const [myFinal, setMyFinal] = useState(null) // { url, prompt } once sent
+  const [opponentFinal, setOpponentFinal] = useState(null)
+  const [guestVoteCode, setGuestVoteCode] = useState('') // guest: the host's vote room
+  const [guestVotes, setGuestVotes] = useState(null) // guest: results from the host
 
-  // Drawing
-  const [brushColor, setBrushColor] = useState('#1A1A2E')
-  const [brushSize, setBrushSize] = useState(8)
-
-  // Voting (audience)
-  const [voteRoomCode, setVoteRoomCode] = useState('')
-  const [audienceVotes, setAudienceVotes] = useState({ A: 0, B: 0 })
-  const [audienceCount, setAudienceCount] = useState(0)
-  const [votingClosed, setVotingClosed] = useState(false)
-
-  // Refs
-  const peerRef = useRef(null)
-  const connRef = useRef(null)
   const canvasRef = useRef(null)
-  const timerRef = useRef(null)
-  const joinTimeoutRef = useRef(null)
-  const phaseRef = useRef(phase)
-  const realtimeRef = useRef(null)
-  const generateDebounceRef = useRef(null)
-  const generatingRef = useRef(false)
-  const pendingGenerateRef = useRef(false)
-  const isDrawingActiveRef = useRef(false)
   const hasDrawnRef = useRef(false)
-  const myPromptRef = useRef('')
-  const endsAtRef = useRef(null)
-  const scoredRef = useRef(false)
-  const votePeerRef = useRef(null)
-  const voteConnectionsRef = useRef([])
-  const audienceVotesRef = useRef({ A: 0, B: 0 })
-  const votingClosedRef = useRef(false)
-  const votedPeerIdsRef = useRef(new Set())
-  const myLiveUrlRef = useRef(null)
-  const opponentLiveUrlRef = useRef(null)
-  const myFinalUrlRef = useRef(null)
-  const opponentFinalUrlRef = useRef(null)
-  const opponentNameRef = useRef('Opponent')
-  const targetPromptRef = useRef('')
+  const scoredMatchRef = useRef(-1)
+  const current = useLatestRef({ matchId, myLiveUrl })
 
-  useEffect(() => { phaseRef.current = phase }, [phase])
-  useEffect(() => { myPromptRef.current = myPromptText }, [myPromptText])
-  useEffect(() => { myLiveUrlRef.current = myLiveUrl }, [myLiveUrl])
-  useEffect(() => { opponentLiveUrlRef.current = opponentLiveUrl }, [opponentLiveUrl])
-  useEffect(() => { myFinalUrlRef.current = myFinalUrl }, [myFinalUrl])
-  useEffect(() => { opponentFinalUrlRef.current = opponentFinalUrl }, [opponentFinalUrl])
-  useEffect(() => { opponentNameRef.current = opponentName }, [opponentName])
-  useEffect(() => { targetPromptRef.current = targetPrompt }, [targetPrompt])
+  // ---------- CONNECTION ----------
 
-  // ---------- PEER MESSAGING ----------
+  const duel = useDuelConnection({
+    username,
+    accepting: phase === 'waiting',
+    onMessage: handleMessage,
+    onClosed() {
+      if (phase === 'playing' || phase === 'countdown' || (!isHost && phase === 'waiting')) {
+        duel.leave(isHost ? 'Opponent disconnected!' : 'The host left the room.')
+        setPhase('lobby')
+      }
+    },
+    onFailed: () => setPhase('lobby'),
+  })
 
-  const send = useCallback((data) => {
-    if (connRef.current?.open) connRef.current.send(data)
-  }, [])
-
-  function cleanupPeer() {
-    if (timerRef.current) clearInterval(timerRef.current)
-    if (joinTimeoutRef.current) { clearTimeout(joinTimeoutRef.current); joinTimeoutRef.current = null }
-    if (realtimeRef.current) { try { realtimeRef.current.close() } catch { /* ignore */ } realtimeRef.current = null }
-    if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
-    if (connRef.current) { connRef.current.close(); connRef.current = null }
-    if (peerRef.current) { peerRef.current.destroy(); peerRef.current = null }
-    if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
-    voteConnectionsRef.current = []
-    setConnected(false)
-  }
-
-  function resetGame() {
-    setPhase('waiting')
-    setTargetPrompt('')
-    setTimeLeft(GAME_DURATION)
-    setMyPromptText('')
-    setMyLiveUrl(null)
-    setOpponentLiveUrl(null)
-    setMyFinalUrl(null)
-    setMyFinalPrompt('')
-    setOpponentFinalUrl(null)
-    setOpponentFinalPrompt('')
-    setVoteRoomCode('')
-    setAudienceVotes({ A: 0, B: 0 })
-    setAudienceCount(0)
-    setVotingClosed(false)
-    audienceVotesRef.current = { A: 0, B: 0 }
-    votingClosedRef.current = false
-    votedPeerIdsRef.current = new Set()
-    endsAtRef.current = null
-    if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
-    voteConnectionsRef.current = []
-    scoredRef.current = false
-  }
-
-  const handleMessage = useCallback((msg) => {
+  function handleMessage(msg) {
     switch (msg.type) {
       case 'hello':
-        setOpponentName(msg.name)
+        setOpponentName(String(msg.name || 'Opponent'))
         break
       case 'start':
-        setTargetPrompt(msg.prompt)
-        endsAtRef.current = msg.endsAt || (Date.now() + (COUNTDOWN_SECONDS + GAME_DURATION) * 1000)
-        setCountdownNum(COUNTDOWN_SECONDS)
-        setPhase('countdown')
+        beginMatch(msg.prompt, msg.endsAt || newEndsAt())
         break
       case 'live':
         setOpponentLiveUrl(msg.url)
         break
       case 'final':
-        setOpponentFinalUrl(msg.url)
-        setOpponentFinalPrompt(msg.prompt)
+        setOpponentFinal({ url: msg.url || '', prompt: msg.prompt || '' })
         break
       case 'vote-room':
-        setVoteRoomCode(msg.code)
+        setGuestVoteCode(msg.code)
         break
       case 'vote-results':
-        setAudienceVotes({ A: msg.results.votesA, B: msg.results.votesB })
-        setVotingClosed(true)
+        if (!isHost && msg.results) {
+          setGuestVotes({ A: msg.results.votesA || 0, B: msg.results.votesB || 0 })
+          finishMatch({ A: msg.results.votesA || 0, B: msg.results.votesB || 0 })
+        }
         break
       case 'rematch':
-        resetGame()
+        resetMatch()
         break
       default:
         break
     }
-  }, [])
-
-  const setupConn = useCallback((conn) => {
-    connRef.current = conn
-    conn.on('open', () => {
-      if (joinTimeoutRef.current) { clearTimeout(joinTimeoutRef.current); joinTimeoutRef.current = null }
-      setConnected(true)
-      conn.send({ type: 'hello', name: username })
-    })
-    conn.on('data', handleMessage)
-    conn.on('close', () => {
-      setConnected(false)
-      if (phaseRef.current === 'playing' || phaseRef.current === 'countdown') {
-        setError('Opponent disconnected!')
-        setPhase('lobby')
-        cleanupPeer()
-      }
-    })
-    conn.on('error', () => setError('Connection error. Try again.'))
-  }, [username, handleMessage])
-
-  useEffect(() => () => cleanupPeer(), [])
-
-  // ---------- ROOM CREATION / JOINING ----------
+  }
 
   function createRoom() {
-    setError(null)
-    const code = generateRoomCode()
-    setRoomCode(code)
     setIsHost(true)
     setPhase('waiting')
-    const peer = new Peer(`promptoff-${code}`)
-    peerRef.current = peer
-    peer.on('connection', (conn) => {
-      // Only accept a single opponent, and only while waiting in the lobby room
-      if (connRef.current?.open || phaseRef.current !== 'waiting') {
-        conn.close()
-        return
-      }
-      setupConn(conn)
-    })
-    peer.on('error', (err) => {
-      const transient = err.type === 'network' || err.type === 'disconnected' || err.type === 'server-error'
-      if (transient && connRef.current?.open) {
-        console.warn('PeerJS transient error (ignored, game in progress):', err.type)
-        return
-      }
-      setError(err.type === 'unavailable-id' ? 'Room code taken. Try again.' : 'Connection failed. Check your network.')
-      setPhase('lobby')
-      cleanupPeer()
-    })
+    duel.create()
   }
 
-  function joinRoom(e) {
-    e.preventDefault()
-    if (!joinCode.trim()) return
-    setError(null)
+  function joinRoom(code) {
     setIsHost(false)
-    const peer = new Peer()
-    peerRef.current = peer
-    peer.on('open', () => {
-      const conn = peer.connect(`promptoff-${joinCode.trim().toUpperCase()}`, { reliable: true })
-      setupConn(conn)
-      setPhase('waiting')
-      joinTimeoutRef.current = setTimeout(() => {
-        joinTimeoutRef.current = null
-        if (!connRef.current?.open) {
-          setError('Could not connect. Check the room code.')
-          setPhase('lobby')
-          cleanupPeer()
-        }
-      }, 10000)
-    })
-    peer.on('error', (err) => {
-      const transient = err.type === 'network' || err.type === 'disconnected' || err.type === 'server-error'
-      if (transient && connRef.current?.open) {
-        console.warn('PeerJS transient error (ignored, game in progress):', err.type)
-        return
-      }
-      setError('Could not connect. Check the room code.')
-      setPhase('lobby')
-      cleanupPeer()
-    })
+    setPhase('waiting')
+    duel.join(code)
   }
 
-  function startGame() {
-    const prompt = PROMPTS[Math.floor(Math.random() * PROMPTS.length)]
-    setTargetPrompt(prompt)
-    const endsAt = Date.now() + (COUNTDOWN_SECONDS + GAME_DURATION) * 1000
-    endsAtRef.current = endsAt
-    send({ type: 'start', prompt, endsAt })
-    setCountdownNum(COUNTDOWN_SECONDS)
-    setPhase('countdown')
+  function leaveRoom() {
+    duel.leave()
+    resetMatch()
+    setPhase('lobby')
   }
 
-  // ---------- COUNTDOWN ----------
+  // ---------- MATCH FLOW ----------
 
-  useEffect(() => {
-    if (phase !== 'countdown') return
-    const interval = setInterval(() => {
-      setCountdownNum(prev => {
-        if (prev <= 1) { clearInterval(interval); setPhase('playing'); return 0 }
-        return prev - 1
-      })
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [phase])
-
-  // ---------- CANVAS INIT / TIME UP / SUBMIT ----------
-
-  function initCanvas(canvas) {
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    ctx.fillStyle = '#FFFFFF'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
+  function resetMatch() {
+    setPhase('waiting')
+    setTargetPrompt('')
+    setMyPrompt('')
+    setMyLiveUrl(null)
+    setOpponentLiveUrl(null)
+    setMyFinalPrompt('')
+    setMyFinal(null)
+    setOpponentFinal(null)
+    setGuestVoteCode('')
+    setGuestVotes(null)
     hasDrawnRef.current = false
   }
 
-  async function submitFinal(promptText) {
-    if (timerRef.current) clearInterval(timerRef.current)
-    if (realtimeRef.current) { try { realtimeRef.current.close() } catch { /* ignore */ } realtimeRef.current = null }
-    setPhase('generating')
-    setMyFinalPrompt(promptText)
-    try {
-      const canvas = canvasRef.current
-      const canvasData = canvas ? canvas.toDataURL('image/jpeg', 0.6) : null
-      let url
-      if (canvasData) {
-        url = await generateFromSketch(promptText, canvasData, { strength: 0.6 })
-      } else {
-        url = await generateImage(promptText)
-      }
-      setMyFinalUrl(url)
-      send({ type: 'final', url, prompt: promptText })
-    } catch {
-      const fallback = myLiveUrlRef.current || ''
-      setMyFinalUrl(fallback)
-      send({ type: 'final', url: fallback, prompt: promptText })
-    }
+  function beginMatch(prompt, matchEndsAt) {
+    resetMatch()
+    setMatchId((m) => m + 1)
+    setTargetPrompt(prompt)
+    setEndsAt(matchEndsAt)
+    setCountdownNum(COUNTDOWN_SECONDS)
+    setTimeLeft(GAME_DURATION)
+    setPhase('countdown')
   }
 
-  async function handleTimeUp() {
-    await submitFinal(myPromptRef.current.trim() || 'abstract art')
-  }
-
-  async function handleSubmitEarly() {
-    if (!myPromptText.trim()) return
-    await submitFinal(myPromptText.trim())
-  }
-
-  // ---------- GAME TIMER ----------
-
-  useEffect(() => {
-    if (phase !== 'playing') return
-    if (!endsAtRef.current) endsAtRef.current = Date.now() + GAME_DURATION * 1000
-    setTimeLeft(Math.max(0, Math.round((endsAtRef.current - Date.now()) / 1000)))
-    // The canvas is mounted from the start (inside <details>), init it once
-    initCanvas(canvasRef.current)
-    scoredRef.current = false
-
-    // Try to set up real-time connection
-    try {
-      realtimeRef.current = connectRealtime(
-        (url) => {
-          setMyLiveUrl(url)
-          send({ type: 'live', url })
-        },
-        () => { /* errors handled silently for realtime */ }
-      )
-    } catch {
-      // Realtime not available — fallback to debounced generation
-    }
-
-    timerRef.current = setInterval(() => {
-      const remaining = Math.max(0, Math.round((endsAtRef.current - Date.now()) / 1000))
-      setTimeLeft(remaining)
-      if (remaining <= 0) {
-        clearInterval(timerRef.current)
-        handleTimeUp()
-      }
-    }, 1000)
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-      if (realtimeRef.current) { try { realtimeRef.current.close() } catch { /* ignore */ } realtimeRef.current = null }
-      if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
-    }
-  }, [phase])
-
-  // ---------- REAL-TIME GENERATION ----------
-
-  function triggerRealtimeGeneration() {
-    if (phaseRef.current !== 'playing') return
-    const canvas = canvasRef.current
-    const prompt = myPromptRef.current.trim()
-    const blank = !hasDrawnRef.current
-    if (!prompt && blank) return
-
-    // If canvas has drawing, use image-to-image with realtime connection
-    if (!blank && canvas) {
-      const canvasData = canvas.toDataURL('image/jpeg', 0.5)
-      if (realtimeRef.current) {
-        try {
-          realtimeRef.current.send({
-            prompt: prompt || 'abstract shapes',
-            image_url: canvasData,
-            strength: 0.65,
-            num_inference_steps: 4,
-            guidance_scale: 1,
-            seed: 42,
-          })
-          return
-        } catch {
-          // Fall through to debounced approach
-        }
-      }
-    }
-
-    // Debounced generation — text-to-image if canvas blank, image-to-image otherwise
-    if (generateDebounceRef.current) clearTimeout(generateDebounceRef.current)
-    generateDebounceRef.current = setTimeout(async () => {
-      if (generatingRef.current) { pendingGenerateRef.current = true; return }
-      generatingRef.current = true
-      try {
-        let url
-        if (blank || !canvas) {
-          // Pure text-to-image
-          url = await generateImage(prompt || 'abstract art')
-        } else {
-          const canvasData = canvas.toDataURL('image/jpeg', 0.5)
-          url = await generateFromSketch(prompt || 'abstract shapes', canvasData)
-        }
-        if (phaseRef.current === 'playing') {
-          setMyLiveUrl(url)
-          send({ type: 'live', url })
-        }
-      } catch { /* ignore preview errors */ }
-      generatingRef.current = false
-      if (pendingGenerateRef.current) {
-        pendingGenerateRef.current = false
-        triggerRealtimeGeneration()
-      }
-    }, 400)
-  }
-
-  // Re-trigger generation when prompt text changes — the internal 400ms debounce paces requests
-  useEffect(() => {
-    if (phase !== 'playing') return
-    if (!myPromptText.trim()) return
-    triggerRealtimeGeneration()
-  }, [myPromptText, phase])
-
-  // Move to voting when both finals are in, or after timeout
-  useEffect(() => {
-    if (phase !== 'generating') return
-    if (myFinalUrl !== null && opponentFinalUrl !== null) {
-      const advance = setTimeout(() => setPhase('voting'), 0)
-      return () => clearTimeout(advance)
-    }
-    // Timeout: after 15s, move to voting with whatever we have
-    const timeout = setTimeout(() => {
-      if (phaseRef.current === 'generating') {
-        // Use live URLs as fallback for missing finals
-        if (!myFinalUrl) {
-          const fallback = myLiveUrl || ''
-          setMyFinalUrl(fallback)
-          setMyFinalPrompt(myPromptRef.current.trim() || 'No prompt')
-          send({ type: 'final', url: fallback, prompt: myPromptRef.current.trim() || 'No prompt' })
-        }
-        if (!opponentFinalUrl && opponentLiveUrl) {
-          setOpponentFinalUrl(opponentLiveUrl)
-          setOpponentFinalPrompt('(timed out)')
-        }
-        setPhase('voting')
-      }
-    }, 15000)
-    return () => clearTimeout(timeout)
-  }, [myFinalUrl, opponentFinalUrl, phase, myLiveUrl, opponentLiveUrl])
-
-  // ---------- AUDIENCE VOTING ROOM ----------
-
-  function buildVoteData() {
-    return {
-      type: 'vote-data',
-      prompt: targetPromptRef.current,
-      imageA: myFinalUrlRef.current || myLiveUrlRef.current || '',
-      imageB: opponentFinalUrlRef.current || opponentLiveUrlRef.current || '',
-      labelA: username,
-      labelB: opponentNameRef.current,
-    }
-  }
-
-  useEffect(() => {
-    if (phase !== 'voting') return
-    // Only the host creates the voting room
-    if (!isHost) return
-
-    // Use a fresh code for the voting room to avoid PeerJS ID conflicts
-    const code = generateRoomCode()
-    audienceVotesRef.current = { A: 0, B: 0 }
-    votingClosedRef.current = false
-    votedPeerIdsRef.current = new Set()
-    voteConnectionsRef.current = []
-    // Defer the state resets so the effect body stays a pure external-system sync
-    const initTimeout = setTimeout(() => {
-      setVoteRoomCode(code)
-      setAudienceVotes({ A: 0, B: 0 })
-      setAudienceCount(0)
-      setVotingClosed(false)
-    }, 0)
-
-    const votePeer = new Peer(`promptoff-vote-${code}`)
-    votePeerRef.current = votePeer
-
-    votePeer.on('connection', (conn) => {
-      conn.on('open', () => {
-        voteConnectionsRef.current.push(conn)
-        setAudienceCount(prev => prev + 1)
-        // Send the vote data to the new viewer — read refs so the data is never stale
-        conn.send(buildVoteData())
-      })
-
-      conn.on('data', (msg) => {
-        if (votingClosedRef.current) return
-        if (msg.type === 'vote' && (msg.vote === 'A' || msg.vote === 'B')) {
-          if (votedPeerIdsRef.current.has(conn.peer)) return
-          votedPeerIdsRef.current.add(conn.peer)
-          audienceVotesRef.current[msg.vote]++
-          setAudienceVotes({ ...audienceVotesRef.current })
-        }
-      })
-
-      conn.on('close', () => {
-        const idx = voteConnectionsRef.current.indexOf(conn)
-        if (idx !== -1) {
-          voteConnectionsRef.current.splice(idx, 1)
-          setAudienceCount(prev => Math.max(0, prev - 1))
-        }
-      })
-    })
-
-    votePeer.on('error', () => { /* ignore voting peer errors */ })
-
-    // Also tell the opponent the vote room code
-    send({ type: 'vote-room', code })
-
-    return () => {
-      clearTimeout(initTimeout)
-      if (votePeerRef.current) { votePeerRef.current.destroy(); votePeerRef.current = null }
-      voteConnectionsRef.current = []
-    }
-  }, [phase])
-
-  // If final URLs land after spectators connected, refresh their vote data
-  useEffect(() => {
-    if (phase !== 'voting' || !isHost) return
-    voteConnectionsRef.current.forEach(conn => {
-      if (conn.open) conn.send(buildVoteData())
-    })
-  }, [myFinalUrl, opponentFinalUrl, phase, isHost])
-
-  function broadcastResults() {
-    votingClosedRef.current = true
-    const results = { votesA: audienceVotesRef.current.A, votesB: audienceVotesRef.current.B }
-    // Send to all audience viewers
-    voteConnectionsRef.current.forEach(conn => {
-      if (conn.open) conn.send({ type: 'vote-results', results })
-    })
-    // Send to the opponent (guest) via game connection — same payload shape
-    send({ type: 'vote-results', results })
-    setVotingClosed(true)
-  }
-
-  // ---------- CANVAS DRAWING ----------
-
-  function getCanvasPos(e, canvas) {
-    const rect = canvas.getBoundingClientRect()
-    const scaleX = canvas.width / rect.width
-    const scaleY = canvas.height / rect.height
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY
-    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY }
-  }
-
-  function handleDrawStart(e) {
-    e.preventDefault()
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const pos = getCanvasPos(e, canvas)
-    const ctx = canvas.getContext('2d')
-    ctx.beginPath()
-    ctx.moveTo(pos.x, pos.y)
-    isDrawingActiveRef.current = true
-  }
-
-  function handleDrawMove(e) {
-    e.preventDefault()
-    if (!isDrawingActiveRef.current) return
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const pos = getCanvasPos(e, canvas)
-    const ctx = canvas.getContext('2d')
-    ctx.strokeStyle = brushColor
-    ctx.lineWidth = brushSize
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    ctx.lineTo(pos.x, pos.y)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(pos.x, pos.y)
-    hasDrawnRef.current = true
-  }
-
-  function handleDrawEnd(e) {
-    if (e) e.preventDefault()
-    if (!isDrawingActiveRef.current) return
-    isDrawingActiveRef.current = false
-    if (canvasRef.current) triggerRealtimeGeneration()
-  }
-
-  function clearCanvas() {
-    initCanvas(canvasRef.current)
-    triggerRealtimeGeneration()
-  }
-
-  function copyCode() {
-    navigator.clipboard.writeText(roomCode).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
+  function startGame() {
+    const prompt = pickPrompt()
+    const matchEndsAt = newEndsAt()
+    duel.send({ type: 'start', prompt, endsAt: matchEndsAt })
+    beginMatch(prompt, matchEndsAt)
   }
 
   function requestRematch() {
-    send({ type: 'rematch' })
-    resetGame()
+    duel.send({ type: 'rematch' })
+    resetMatch()
   }
 
-  // Score on audience vote result
-  // A = host's image, B = guest's image
-  const myAudienceVotes = isHost ? audienceVotes.A : audienceVotes.B
-  const theirAudienceVotes = isHost ? audienceVotes.B : audienceVotes.A
-  const iWonAudience = votingClosed && myAudienceVotes > theirAudienceVotes
-  const theyWonAudience = votingClosed && theirAudienceVotes > myAudienceVotes
-  const audienceTie = votingClosed && myAudienceVotes === theirAudienceVotes
-  const myPoints = iWonAudience ? 200 : theyWonAudience ? 50 : 100
+  // ---------- LIVE PREVIEW ----------
 
+  const live = useLiveGeneration({
+    active: phase === 'playing',
+    matchId,
+    getInput: () => ({
+      prompt: myPrompt.trim(),
+      sketch: hasDrawnRef.current && canvasRef.current ? canvasRef.current.toDataURL('image/jpeg', 0.5) : null,
+    }),
+    onImage: (url) => {
+      setMyLiveUrl(url)
+      duel.send({ type: 'live', url })
+    },
+  })
+
+  function changePrompt(text) {
+    setMyPrompt(text)
+    live.poke()
+  }
+
+  function handleStroke() {
+    hasDrawnRef.current = true
+    live.poke()
+  }
+
+  function handleClear() {
+    hasDrawnRef.current = false
+    live.poke()
+  }
+
+  // ---------- FINAL IMAGES ----------
+
+  function sendFinal(url, prompt) {
+    setMyFinal({ url, prompt })
+    duel.send({ type: 'final', url, prompt })
+  }
+
+  function submitFinal(promptText) {
+    if (phase !== 'playing') return
+    const id = matchId
+    const canvas = canvasRef.current
+    const sketch = hasDrawnRef.current && canvas ? canvas.toDataURL('image/jpeg', 0.6) : null
+    setPhase('generating')
+    setMyFinalPrompt(promptText)
+    // If the credit modal is open, this waits for the answer; a late image
+    // still replaces the fallback below (and reaches the voters).
+    const job = live.creditDeclined
+      ? Promise.resolve(null)
+      : (sketch ? generateFromSketch(promptText, sketch, { strength: 0.6 }) : generateImage(promptText)).catch(() => null)
+    job.then((url) => {
+      if (current.current.matchId !== id) return
+      sendFinal(url || current.current.myLiveUrl || '', promptText)
+    })
+  }
+
+  function submitEarly() {
+    if (myPrompt.trim()) submitFinal(myPrompt.trim())
+  }
+
+  // Countdown, then the round clock. Both follow the host's endsAt.
+  const onTimeUp = useEffectEvent(() => submitFinal(myPrompt.trim() || 'abstract art'))
   useEffect(() => {
-    if (votingClosed && !scoredRef.current) {
-      scoredRef.current = true
-      const result = iWonAudience ? 'win' : theyWonAudience ? 'loss' : 'tie'
-      addScore(game.id, username, myPoints, { prompt: targetPrompt, result, myVotes: myAudienceVotes, theirVotes: theirAudienceVotes })
+    if (phase !== 'countdown' && phase !== 'playing') return
+    const tick = () => {
+      const now = Date.now()
+      if (phase === 'countdown') {
+        const left = Math.ceil((endsAt - GAME_DURATION * 1000 - now) / 1000)
+        setCountdownNum(Math.max(0, left))
+        if (left <= 0) setPhase('playing')
+        return
+      }
+      const left = Math.max(0, Math.ceil((endsAt - now) / 1000))
+      setTimeLeft(left)
+      if (left <= 0) onTimeUp()
     }
-  }, [votingClosed])
+    const interval = setInterval(tick, 250)
+    return () => clearInterval(interval)
+  }, [phase, endsAt])
+
+  // Move to voting when both finals are in, or after FINAL_WAIT_MS.
+  const bothFinal = myFinal !== null && opponentFinal !== null
+  const onFinalWaitOver = useEffectEvent(() => {
+    if (!myFinal) sendFinal(myLiveUrl || '', myFinalPrompt || myPrompt.trim() || 'No prompt')
+    if (!opponentFinal && opponentLiveUrl) setOpponentFinal({ url: opponentLiveUrl, prompt: '(timed out)' })
+    setPhase('voting')
+  })
+  useEffect(() => {
+    if (phase !== 'generating') return
+    const timeout = setTimeout(onFinalWaitOver, bothFinal ? 0 : FINAL_WAIT_MS)
+    return () => clearTimeout(timeout)
+  }, [phase, bothFinal])
+
+  // ---------- AUDIENCE VOTING ----------
+
+  const myImage = myFinal?.url || myLiveUrl || ''
+  const opponentImage = opponentFinal?.url || opponentLiveUrl || ''
+  const voteData = useMemo(
+    () => ({ prompt: targetPrompt, imageA: isHost ? myImage : opponentImage, imageB: isHost ? opponentImage : myImage, labelA: isHost ? username : opponentName, labelB: isHost ? opponentName : username }),
+    [targetPrompt, isHost, myImage, opponentImage, username, opponentName]
+  )
+  const voteRoom = useVoteRoom({
+    active: phase === 'voting' && isHost,
+    matchId,
+    voteData,
+    onReady: (code) => duel.send({ type: 'vote-room', code }),
+  })
+
+  const votes = isHost ? voteRoom.votes : guestVotes || NO_VOTES
+  const votingClosed = isHost ? voteRoom.closed : guestVotes !== null
+  const voteCode = isHost ? voteRoom.code : guestVoteCode
+
+  function finishMatch(finalVotes) {
+    if (scoredMatchRef.current === matchId) return // once per match
+    scoredMatchRef.current = matchId
+    const { result, points, mine, theirs } = matchResult(finalVotes, isHost)
+    addScore(game.id, username, points, { prompt: targetPrompt, result, myVotes: mine, theirVotes: theirs })
+  }
+
+  function closeVoting() {
+    const results = voteRoom.close()
+    duel.send({ type: 'vote-results', results })
+    finishMatch({ A: results.votesA, B: results.votesB })
+  }
 
   // ==================== RENDER ====================
 
-  // LOBBY
-  if (phase === 'lobby') {
-    return (
-      <div className="flex flex-col gap-6 max-w-lg mx-auto">
-        <div className="brutalist-card p-8 text-center">
-          <p className="text-5xl mb-4">🥊</p>
-          <h3 className="text-2xl font-black text-navy uppercase mb-2">Prompt Off</h3>
-          <p className="text-navy/50 text-sm font-medium mb-6">
-            Head-to-head AI art battle! Draw and prompt in real-time to create
-            the best image. Your canvas feeds the AI live — Krea-style.
-          </p>
+  if (phase === 'lobby') return <LobbyView error={duel.error} onCreate={createRoom} onJoin={joinRoom} />
 
-          {error && (
-            <div className="p-3 bg-red-50 border-2 border-red-400 text-red-700 text-sm font-medium mb-4">{error}</div>
-          )}
-
-          <button onClick={createRoom}
-            className="w-full py-4 bg-primary text-white font-black uppercase text-sm mb-4"
-            style={{ border: '2px solid #1A1A2E' }}>
-            Create Room
-          </button>
-
-          <div className="relative my-4">
-            <div className="absolute inset-0 flex items-center"><div className="w-full border-t-2 border-navy/10" /></div>
-            <div className="relative flex justify-center"><span className="bg-white px-4 text-xs font-black text-navy/30 uppercase">or join</span></div>
-          </div>
-
-          <form onSubmit={joinRoom} className="flex gap-2">
-            <input
-              type="text" placeholder="ROOM CODE"
-              value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-              maxLength={5}
-              className="flex-1 px-4 py-3 text-center text-navy text-lg font-black uppercase tracking-widest focus:outline-none"
-              style={{ border: '3px solid #1A1A2E' }}
-            />
-            <button type="submit" disabled={joinCode.length < 5}
-              className="px-6 py-3 bg-accent text-navy font-black uppercase text-sm disabled:opacity-40"
-              style={{ border: '2px solid #1A1A2E' }}>
-              Join
-            </button>
-          </form>
-        </div>
-      </div>
-    )
-  }
-
-  // WAITING
   if (phase === 'waiting') {
     return (
-      <div className="flex flex-col gap-6 max-w-lg mx-auto">
-        <div className="brutalist-card p-8 text-center">
-          {isHost ? (
-            <>
-              <p className="text-4xl mb-4">📡</p>
-              <h3 className="font-black text-navy uppercase mb-2">
-                {connected ? 'Opponent Connected!' : 'Waiting for Opponent...'}
-              </h3>
-              <div className="flex items-center justify-center gap-2 my-6">
-                <span className="text-3xl font-black text-primary tracking-[0.3em]">{roomCode}</span>
-                <button onClick={copyCode} className="p-2 hover:bg-navy/5 transition-colors" title="Copy code">
-                  {copied ? <Check className="w-5 h-5 text-green-600" /> : <Copy className="w-5 h-5 text-navy/40" />}
-                </button>
-              </div>
-              <p className="text-navy/40 text-xs font-medium mb-6">Share this code with your opponent</p>
-              {connected ? (
-                <div className="space-y-3">
-                  <p className="text-sm font-bold text-green-600">🟢 {opponentName} has joined!</p>
-                  <button onClick={startGame}
-                    className="w-full py-4 bg-accent text-navy font-black uppercase text-sm animate-pulse"
-                    style={{ border: '2px solid #1A1A2E' }}>
-                    Start Game!
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center gap-2 text-navy/30 text-sm">
-                  <div className="animate-spin rounded-full" style={{ width: 16, height: 16, border: '2px solid #1A1A2E33', borderTopColor: '#1A1A2E' }} />
-                  <span className="font-medium">Listening for connections...</span>
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              <p className="text-4xl mb-4">{connected ? '🟢' : '🔌'}</p>
-              <h3 className="font-black text-navy uppercase mb-2">{connected ? 'Connected!' : 'Connecting...'}</h3>
-              <p className="text-sm text-navy/50 font-medium">
-                {connected ? `Waiting for ${opponentName || 'host'} to start...` : `Connecting to room ${joinCode}...`}
-              </p>
-            </>
-          )}
-        </div>
-      </div>
+      <WaitingView isHost={isHost} connected={duel.connected} roomCode={duel.roomCode} opponentName={opponentName} onStart={startGame} onLeave={leaveRoom} />
     )
   }
 
-  // COUNTDOWN
-  if (phase === 'countdown') {
-    return (
-      <div className="flex items-center justify-center" style={{ minHeight: 400 }}>
-        <div className="text-center">
-          <p className="text-8xl font-black text-primary mb-4 animate-bounce">
-            {countdownNum > 0 ? countdownNum : 'GO!'}
-          </p>
-          <p className="text-navy/50 font-black uppercase text-sm">Get ready to draw & prompt!</p>
-        </div>
-      </div>
-    )
-  }
+  if (phase === 'countdown') return <CountdownView count={countdownNum} />
 
-  // PLAYING
   if (phase === 'playing') {
     return (
-      <div className="flex flex-col gap-3">
-        {/* Target prompt + timer */}
-        <div className="brutalist-card p-4 flex items-center justify-between">
-          <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-black text-navy/40 uppercase mb-0.5">Recreate this</p>
-            <p className="text-base font-black text-navy truncate">{targetPrompt}</p>
-          </div>
-          <div className={`flex items-center gap-1.5 text-3xl font-black ml-4 tabular-nums ${timeLeft <= 10 ? 'text-red-500 animate-pulse' : 'text-navy'}`}>
-            <Clock className="w-6 h-6" />
-            {timeLeft}s
-          </div>
-        </div>
-
-        {/* Two image boxes side by side, centered */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
-          {/* YOUR SIDE */}
-          <div className="flex flex-col gap-3">
-            <p className="text-sm font-black text-accent uppercase text-center">You ({username})</p>
-
-            {/* AI output — large square box */}
-            <div style={{ border: '3px solid #C8FF00', aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
-              {myLiveUrl ? (
-                <img src={myLiveUrl} alt="AI output" className="w-full h-full"
-                  style={{ objectFit: 'cover', display: 'block' }} />
-              ) : (
-                <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">
-                  Type a prompt below
-                </div>
-              )}
-            </div>
-
-            {/* Prompt input — directly below the image box */}
-            <div>
-              <p className="text-xs font-black text-accent uppercase mb-1">Your Prompt</p>
-              <textarea
-                value={myPromptText} onChange={(e) => setMyPromptText(e.target.value)}
-                placeholder="Start typing... AI generates as you type!"
-                rows={3}
-                className="w-full px-4 py-3 text-base focus:outline-none font-semibold resize-none rounded-none"
-                style={{ border: '3px solid #C8FF00', background: '#ffffff', color: '#1A1A2E' }}
-                autoFocus
-              />
-            </div>
-
-            {/* Optional sketch canvas — collapsible helper */}
-            <details className="group">
-              <summary className="text-xs font-black text-navy/40 uppercase cursor-pointer hover:text-navy/60 select-none">
-                + Sketch to guide the AI (optional)
-              </summary>
-              <div className="mt-2 flex flex-col gap-2">
-                <div style={{ border: '3px solid #1A1A2E' }}>
-                  <canvas
-                    ref={canvasRef} width={512} height={512}
-                    className="w-full cursor-crosshair touch-none"
-                    style={{ display: 'block', background: '#fff', aspectRatio: '1' }}
-                    onMouseDown={handleDrawStart} onMouseMove={handleDrawMove}
-                    onMouseUp={handleDrawEnd} onMouseLeave={handleDrawEnd}
-                    onTouchStart={handleDrawStart} onTouchMove={handleDrawMove}
-                    onTouchEnd={handleDrawEnd}
-                  />
-                </div>
-                {/* Tools */}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {BRUSH_COLORS.map(c => (
-                    <button key={c} onClick={() => setBrushColor(c)}
-                      className={`w-5 h-5 rounded-full border-2 transition-transform ${brushColor === c ? 'border-primary scale-125' : 'border-navy/20'}`}
-                      style={{ backgroundColor: c }} />
-                  ))}
-                  <div className="w-px h-5 bg-navy/10 mx-0.5" />
-                  {BRUSH_SIZES.map(s => (
-                    <button key={s} onClick={() => setBrushSize(s)}
-                      className={`flex items-center justify-center w-6 h-6 border-2 ${brushSize === s ? 'border-primary bg-primary/10' : 'border-navy/20'}`}>
-                      <span className="rounded-full bg-navy" style={{ width: Math.min(s, 12), height: Math.min(s, 12) }} />
-                    </button>
-                  ))}
-                  <button onClick={clearCanvas} className="ml-auto p-1 border-2 border-navy/20 hover:border-red-400 hover:bg-red-50" title="Clear">
-                    <Trash2 className="w-3.5 h-3.5 text-navy/50" />
-                  </button>
-                </div>
-              </div>
-            </details>
-          </div>
-
-          {/* OPPONENT SIDE */}
-          <div className="flex flex-col gap-3">
-            <p className="text-sm font-black text-primary uppercase text-center">Opponent ({opponentName})</p>
-
-            {/* Opponent AI output — large square box, matching yours */}
-            <div style={{ border: '3px solid #FF2D55', aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
-              {opponentLiveUrl ? (
-                <img src={opponentLiveUrl} alt="Opponent AI" className="w-full h-full"
-                  style={{ objectFit: 'cover', display: 'block' }} />
-              ) : (
-                <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">
-                  Waiting for opponent...
-                </div>
-              )}
-            </div>
-
-            {/* Opponent prompt — hidden, matches layout */}
-            <div>
-              <p className="text-xs font-black text-primary uppercase mb-1">Their Prompt</p>
-              <div className="px-4 py-3 text-white/30 text-base font-medium italic"
-                style={{ border: '3px solid #FF2D55', background: 'rgba(255,45,85,0.08)', minHeight: '5.5rem' }}>
-                Hidden until voting...
-              </div>
-            </div>
-
-          </div>
-        </div>
-
-        {/* Submit early */}
-        <button onClick={handleSubmitEarly} disabled={!myPromptText.trim()}
-          className="w-full py-3 bg-navy text-white font-black uppercase text-sm disabled:opacity-40"
-          style={{ border: '2px solid #1A1A2E' }}>
-          Submit Final Image Early
-        </button>
-      </div>
+      <PlayingView
+        targetPrompt={targetPrompt}
+        timeLeft={timeLeft}
+        username={username}
+        opponentName={opponentName}
+        myLiveUrl={myLiveUrl}
+        opponentLiveUrl={opponentLiveUrl}
+        prompt={myPrompt}
+        onPromptChange={changePrompt}
+        canvasRef={canvasRef}
+        onStroke={handleStroke}
+        onClear={handleClear}
+        onSubmit={submitEarly}
+        creditDeclined={live.creditDeclined}
+        onRetryCredit={live.retry}
+      />
     )
   }
 
-  // GENERATING — show both live outputs while finals are being created
   if (phase === 'generating') {
     return (
-      <div className="flex flex-col gap-4">
-        <div className="brutalist-card p-4 text-center">
-          <h3 className="font-black text-navy uppercase mb-1">Time's Up!</h3>
-          <p className="text-navy/50 text-sm font-medium">Generating final images...</p>
-          <div className="flex justify-center gap-6 mt-3">
-            <span className={`text-xs font-black uppercase ${myFinalUrl ? 'text-green-600' : 'text-navy/30 animate-pulse'}`}>
-              {myFinalUrl ? '✓ You' : '⏳ You'}
-            </span>
-            <span className={`text-xs font-black uppercase ${opponentFinalUrl ? 'text-green-600' : 'text-navy/30 animate-pulse'}`}>
-              {opponentFinalUrl ? `✓ ${opponentName}` : `⏳ ${opponentName}`}
-            </span>
-          </div>
-        </div>
-
-        {/* Show both live outputs side by side while waiting */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-black text-accent uppercase text-center">You ({username})</p>
-            <div style={{ border: '3px solid #C8FF00', aspectRatio: '1', overflow: 'hidden' }}>
-              {(myFinalUrl || myLiveUrl) ? (
-                <img src={myFinalUrl || myLiveUrl} alt="Your output" className="w-full h-full"
-                  style={{ objectFit: 'cover', display: 'block' }} />
-              ) : (
-                <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">
-                  Generating...
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-black text-primary uppercase text-center">{opponentName}</p>
-            <div style={{ border: '3px solid #FF2D55', aspectRatio: '1', overflow: 'hidden' }}>
-              {(opponentFinalUrl || opponentLiveUrl) ? (
-                <img src={opponentFinalUrl || opponentLiveUrl} alt="Opponent output" className="w-full h-full"
-                  style={{ objectFit: 'cover', display: 'block' }} />
-              ) : (
-                <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">
-                  Waiting...
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+      <GeneratingView username={username} opponentName={opponentName} myImage={myImage} myDone={myFinal !== null} opponentImage={opponentImage} opponentDone={opponentFinal !== null} />
     )
   }
 
-  // VOTING — audience votes via QR code, players see results live
-  if (phase === 'voting' || phase === 'judging') {
-    const totalVotes = audienceVotes.A + audienceVotes.B
-    // A = host, B = guest — map to "my" and "their" perspective
-    const hostName = isHost ? username : opponentName
-    const guestName = isHost ? opponentName : username
-    const voteUrl = voteRoomCode ? `${window.location.origin}/vote/${voteRoomCode}` : ''
-
+  if (phase === 'voting') {
     return (
-      <div className="flex flex-col gap-4">
-        {/* Header with prompt */}
-        <div className="brutalist-card p-4 text-center">
-          <p className="text-[10px] font-black text-navy/40 uppercase mb-0.5">The prompt was</p>
-          <p className="text-lg font-black text-navy">"{targetPrompt}"</p>
-        </div>
-
-        {/* Both outputs side by side */}
-        {(() => {
-          // A = host, B = guest. Map to "my" and "their" for correct display
-          const myVotes = isHost ? audienceVotes.A : audienceVotes.B
-          const theirVotes = isHost ? audienceVotes.B : audienceVotes.A
-          const myPct = totalVotes > 0 ? Math.round((myVotes / totalVotes) * 100) : 0
-          const theirPct = totalVotes > 0 ? Math.round((theirVotes / totalVotes) * 100) : 0
-          return (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl mx-auto w-full">
-              {/* Your image */}
-              <div className="flex flex-col gap-2">
-                <p className="text-sm font-black text-accent uppercase text-center">{username}</p>
-                <div style={{ border: `3px solid ${votingClosed && myVotes > theirVotes ? '#C8FF00' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
-                  {myFinalUrl ? (
-                    <img src={myFinalUrl} alt="Your final" className="w-full h-full" style={{ objectFit: 'cover', display: 'block' }} />
-                  ) : (
-                    <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">No image</div>
-                  )}
-                  {votingClosed && myVotes > theirVotes && (
-                    <div className="absolute top-2 left-2 px-2 py-1 text-xs font-black uppercase"
-                      style={{ background: '#C8FF00', color: '#1A1A2E' }}>Winner</div>
-                  )}
-                </div>
-                <p className="text-xs text-white/50 font-medium text-center">
-                  <span className="text-white font-bold">{myFinalPrompt}</span>
-                </p>
-                {totalVotes > 0 && (
-                  <div className="w-full h-8 relative" style={{ border: '2px solid #C8FF00', background: '#1a1a2e' }}>
-                    <div className="h-full transition-all duration-700" style={{ width: `${myPct}%`, background: '#C8FF00' }} />
-                    <span className="absolute inset-0 flex items-center justify-center text-xs font-black"
-                      style={{ color: myPct > 50 ? '#1A1A2E' : '#C8FF00' }}>
-                      {myPct}% ({myVotes})
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Opponent's image */}
-              <div className="flex flex-col gap-2">
-                <p className="text-sm font-black text-primary uppercase text-center">{opponentName}</p>
-                <div style={{ border: `3px solid ${votingClosed && theirVotes > myVotes ? '#FF2D55' : '#333'}`, aspectRatio: '1', overflow: 'hidden', position: 'relative' }}>
-                  {opponentFinalUrl ? (
-                    <img src={opponentFinalUrl} alt="Opponent final" className="w-full h-full" style={{ objectFit: 'cover', display: 'block' }} />
-                  ) : (
-                    <div className="flex items-center justify-center bg-white text-navy/20 text-sm font-bold uppercase w-full h-full">No image</div>
-                  )}
-                  {votingClosed && theirVotes > myVotes && (
-                    <div className="absolute top-2 left-2 px-2 py-1 text-xs font-black uppercase"
-                      style={{ background: '#FF2D55', color: '#fff' }}>Winner</div>
-                  )}
-                </div>
-                <p className="text-xs text-white/50 font-medium text-center">
-                  <span className="text-white font-bold">{opponentFinalPrompt}</span>
-                </p>
-                {totalVotes > 0 && (
-                  <div className="w-full h-8 relative" style={{ border: '2px solid #FF2D55', background: '#1a1a2e' }}>
-                    <div className="h-full transition-all duration-700" style={{ width: `${theirPct}%`, background: '#FF2D55' }} />
-                    <span className="absolute inset-0 flex items-center justify-center text-xs font-black"
-                      style={{ color: theirPct > 50 ? '#fff' : '#FF2D55' }}>
-                      {theirPct}% ({theirVotes})
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )
-        })()}
-
-        {/* QR Code + Audience voting panel */}
-        {!votingClosed ? (
-          <div className="brutalist-card p-6 text-center">
-            <p className="text-sm font-black text-navy uppercase mb-1">Audience Vote</p>
-            <p className="text-xs text-navy/40 font-medium mb-4">Scan to vote for your favorite!</p>
-
-            {voteUrl ? (
-              <div className="flex flex-col items-center gap-4">
-                <div className="bg-white p-3 inline-block" style={{ borderRadius: 8 }}>
-                  <QRCodeSVG value={voteUrl} size={180} level="M"
-                    fgColor="#1A1A2E" bgColor="#ffffff" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <code className="text-xs text-white/60 font-mono bg-white/10 px-3 py-1.5"
-                    style={{ border: '1px solid rgba(255,255,255,0.1)' }}>
-                    {voteUrl}
-                  </code>
-                  <button onClick={() => { navigator.clipboard.writeText(voteUrl); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
-                    className="p-1.5 hover:bg-white/10 transition-colors" title="Copy link">
-                    {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4 text-white/40" />}
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-3 text-white/50 text-sm font-bold mt-2">
-                  <span>{audienceCount} viewer{audienceCount !== 1 ? 's' : ''} connected</span>
-                  <span>|</span>
-                  <span>{totalVotes} vote{totalVotes !== 1 ? 's' : ''} cast</span>
-                </div>
-
-                {isHost && totalVotes > 0 && (
-                  <button onClick={broadcastResults}
-                    className="mt-2 px-8 py-3 font-black uppercase text-sm transition-transform hover:scale-105"
-                    style={{ border: '3px solid #C8FF00', background: 'rgba(200,255,0,0.15)', color: '#C8FF00' }}>
-                    Close Voting & Reveal Results
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="flex items-center justify-center gap-2 text-white/30 text-sm">
-                <div className="animate-spin rounded-full"
-                  style={{ width: 16, height: 16, border: '2px solid #ffffff33', borderTopColor: '#C8FF00' }} />
-                <span>Setting up vote room...</span>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="brutalist-card p-8 text-center">
-            <Trophy className={`w-14 h-14 mx-auto mb-3 ${iWonAudience ? 'text-yellow-500' : theyWonAudience ? 'text-navy/30' : 'text-navy/50'}`} />
-            <h3 className="text-3xl font-black text-navy uppercase mb-2">
-              {audienceTie ? "It's a Tie!" : iWonAudience ? 'You Win!' : `${opponentName} Wins!`}
-            </h3>
-            <p className="text-white/40 text-sm font-medium mb-1">
-              {totalVotes} vote{totalVotes !== 1 ? 's' : ''} from the audience
-            </p>
-            <p className="text-lg font-bold text-white/60 mb-2">
-              {hostName}: {audienceVotes.A} vote{audienceVotes.A !== 1 ? 's' : ''} — {guestName}: {audienceVotes.B} vote{audienceVotes.B !== 1 ? 's' : ''}
-            </p>
-            <p className="text-4xl font-black mb-1" style={{ color: iWonAudience ? '#C8FF00' : theyWonAudience ? '#FF2D55' : '#fff' }}>
-              +{myPoints} pts
-            </p>
-            <p className="text-navy/40 text-xs font-medium mb-6">
-              {iWonAudience ? 'The audience chose you!' : theyWonAudience ? 'Better luck next time!' : 'The audience was split!'}
-            </p>
-            {connected && (
-              <button onClick={requestRematch}
-                className="px-8 py-3 bg-accent text-navy font-black uppercase text-sm"
-                style={{ border: '2px solid #1A1A2E' }}>
-                Rematch!
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+      <VotingView
+        targetPrompt={targetPrompt}
+        isHost={isHost}
+        username={username}
+        opponentName={opponentName}
+        my={{ image: myImage, prompt: myFinal?.prompt || myFinalPrompt }}
+        opponent={{ image: opponentImage, prompt: opponentFinal?.prompt || '' }}
+        votes={votes}
+        closed={votingClosed}
+        outcome={votingClosed ? matchResult(votes, isHost) : null}
+        voteUrl={voteCode ? `${window.location.origin}/vote/${voteCode}` : ''}
+        viewers={voteRoom.viewers}
+        onCloseVoting={closeVoting}
+        connected={duel.connected}
+        onRematch={requestRematch}
+      />
     )
   }
 

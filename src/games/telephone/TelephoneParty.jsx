@@ -347,7 +347,7 @@ function DonePhase({ room, s, nameOf }) {
                 <div className="min-w-0">
                   <p className="text-sm font-black text-navy truncate">{k + 1}. {nameOf(id)}{id === room.myId ? ' (you)' : ''}</p>
                   <p className="text-[10px] font-bold text-navy/50 uppercase">
-                    {sc.turns} turns +{sc.turnPts} · votes +{sc.votePts} · starter +{sc.starterPts}
+                    {sc.turns} turn{sc.turns === 1 ? '' : 's'} +{sc.turnPts} · votes +{sc.votePts} · starter +{sc.starterPts}
                   </p>
                 </div>
                 <p className="text-xl font-black text-primary shrink-0">{sc.total}</p>
