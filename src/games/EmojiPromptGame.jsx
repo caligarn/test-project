@@ -2,6 +2,9 @@ import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { generateImage, judge } from '../lib/fal'
 import { useGameRounds } from '../hooks/useGameRounds'
+import { useMachine } from '../hooks/useMachine'
+import { emojiPromptMachine } from '../machines/emojiPrompt.js'
+import { partyEntryMachine } from '../machines/partyEntry.js'
 import { pickRandom, shuffle } from '../lib/similarity'
 import StatsBar from '../components/game/StatsBar'
 import GameOverCard from '../components/game/GameOverCard'
@@ -110,9 +113,10 @@ export default function EmojiPromptGame({ game }) {
 function EmojiSolo({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
-  const { round, totalScore, gameOver, token, isStale, recordScore, nextRound, restart } =
+  const { round, totalScore, token, isStale, recordScore, nextRound, restart } =
     useGameRounds({ gameId: game.id, username, maxRounds: MAX_ROUNDS })
-  const [phase, setPhase] = useState('idle') // idle, building, generating, result
+  const flow = useMachine(emojiPromptMachine) // see src/machines/emojiPrompt.js
+  const phase = flow.state
   const [scene, setScene] = useState(null)
   const [emojis, setEmojis] = useState([])
   const [result, setResult] = useState(null) // { imageUrl, emojis, score, comment, base, bonus, pts }
@@ -120,23 +124,23 @@ function EmojiSolo({ game }) {
   const [usedScenes, setUsedScenes] = useState([])
 
   const startRound = () => {
+    if (!flow.send('START')) return
     const s = pickRandom(SCENES, usedScenes)
     setScene(s)
     setUsedScenes((u) => [...u, s])
     setEmojis([])
     setResult(null)
     setError(null)
-    setPhase('building')
   }
 
   const submit = async (list) => {
+    if (!flow.send('SUBMIT')) return
     setEmojis(list)
-    setPhase('generating')
     setError(null)
     const t = token()
     try {
       const { emojis: str, imageUrl, verdict } = await playEmojis(list, scene)
-      if (isStale(t)) return
+      if (isStale(t) || !flow.send('SCORED')) return
       let base = FALLBACK_POINTS
       let bonus = 0
       if (verdict.score != null) {
@@ -146,17 +150,16 @@ function EmojiSolo({ game }) {
       const pts = base + bonus
       recordScore(pts)
       setResult({ imageUrl, emojis: str, score: verdict.score, comment: verdict.score != null ? verdict.comment : '', base, bonus, pts })
-      setPhase('result')
     } catch (err) {
-      if (isStale(t)) return
+      if (isStale(t) || !flow.send('FAILED')) return
       setError(err?.message || 'Image generation failed.')
-      setPhase('building')
     }
   }
 
   const handleNext = () => {
+    // A double tap must not skip a round: only the first NEXT/FINISH counts.
+    if (!flow.send(round >= MAX_ROUNDS ? 'FINISH' : 'NEXT')) return
     nextRound()
-    setPhase('idle')
   }
 
   const handleRestart = () => {
@@ -166,17 +169,19 @@ function EmojiSolo({ game }) {
     setResult(null)
     setError(null)
     setUsedScenes([])
-    setPhase('idle')
+    flow.send('RESTART')
   }
 
-  if (gameOver) {
+  if (phase === 'over') {
     return (
-      <GameOverCard emoji="😎" title="Emoji master!" score={`${totalScore} pts`} subtitle={`${MAX_ROUNDS} rounds completed`} onRestart={handleRestart} />
+      <div className="flex flex-col gap-4" {...flow.attrs}>
+        <GameOverCard emoji="😎" title="Emoji master!" score={`${totalScore} pts`} subtitle={`${MAX_ROUNDS} rounds completed`} onRestart={handleRestart} />
+      </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" {...flow.attrs}>
       <StatsBar
         stats={[
           { label: 'Round', value: `${round}/${MAX_ROUNDS}` },
@@ -378,30 +383,29 @@ function ScenePick({ round, onPick }) {
 }
 
 function PartyEmojiSubmit({ challenge, onSubmit }) {
-  const [busy, setBusy] = useState(false)
+  const flow = useMachine(partyEntryMachine) // see src/machines/partyEntry.js
   const [error, setError] = useState(null)
   const [last, setLast] = useState([])
   const alive = useAlive()
 
   const submit = async (list) => {
-    setBusy(true)
+    if (!flow.send('SEND')) return
     setError(null)
     setLast(list)
     try {
       const { emojis, imageUrl, verdict } = await playEmojis(list, challenge.scene)
-      if (!alive.current) return
+      if (!alive.current || !flow.send('SENT')) return
       onSubmit({ text: emojis, imageUrl, judgeScore: verdict.score, judgeComment: verdict.score != null ? verdict.comment : '' })
     } catch (err) {
-      if (!alive.current) return
+      if (!alive.current || !flow.send('SEND_FAILED')) return
       setError(err?.message || 'Image generation failed. Try again.')
-      setBusy(false)
     }
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3" {...flow.attrs}>
       <ErrorBanner message={error} />
-      {busy ? (
+      {!flow.is('composing') ? (
         <div className="flex flex-col gap-2">
           <GeneratingSpinner label="Turning emojis into art..." color={COLOR} />
           <p className="text-3xl text-center break-words">{last.join(' ')}</p>

@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { generateImage, judge } from '../lib/fal'
 import { useGameRounds } from '../hooks/useGameRounds'
+import { useMachine } from '../hooks/useMachine'
+import { promptGuesserMachine } from '../machines/promptGuesser'
 import { promptSimilarityDetail, pickRandom, shuffle } from '../lib/similarity'
 import StatsBar from '../components/game/StatsBar'
 import GameOverCard from '../components/game/GameOverCard'
@@ -65,7 +67,8 @@ export default function PromptGuesserGame({ game }) {
   const username = user?.username || 'guest'
   const { round, totalScore, gameOver, token, isStale, recordScore, nextRound, restart } =
     useGameRounds({ gameId: game.id, username, maxRounds: MAX_ROUNDS })
-  const [phase, setPhase] = useState('idle') // idle, loading-target, guessing, drawing, judging, result
+  const flow = useMachine(promptGuesserMachine) // see src/machines/promptGuesser.js
+  const phase = flow.state
   const [imageUrl, setImageUrl] = useState(null)
   const [guessUrl, setGuessUrl] = useState(null)
   const [hiddenPrompt, setHiddenPrompt] = useState(null)
@@ -77,7 +80,7 @@ export default function PromptGuesserGame({ game }) {
   const [usedPrompts, setUsedPrompts] = useState([])
 
   const startRound = async () => {
-    setPhase('loading-target')
+    if (!flow.send('START')) return
     setResult(null)
     setGuess('')
     setGuessUrl(null)
@@ -89,27 +92,28 @@ export default function PromptGuesserGame({ game }) {
     try {
       const url = await generateImage(prompt)
       if (isStale(t)) return
+      if (!flow.send('LOADED')) return
       setHiddenPrompt(prompt)
       setUsedPrompts(prev => [...prev, prompt])
       setImageUrl(url)
-      setPhase('guessing')
     } catch (err) {
       if (isStale(t)) return
+      if (!flow.send('LOAD_FAILED')) return
       setError(err?.message ? `Could not make the image: ${err.message}` : 'Could not make the image. Try again.')
-      setPhase('idle')
     }
   }
 
   const handleGuess = async (e) => {
     e.preventDefault()
     const text = guess.trim()
-    if (!text || !hiddenPrompt || phase !== 'guessing') return
+    if (!text || !hiddenPrompt) return
+    // Only one guess per round: a second submit while drawing is ignored.
+    if (!flow.send('GUESS')) return
     setError(null)
     const { score: wordScore, matchedWords } = promptSimilarityDetail(text, hiddenPrompt)
     const t = token()
 
     // 1. Draw the player's guess.
-    setPhase('drawing')
     let drawn = null
     try {
       drawn = await generateImage(text)
@@ -117,14 +121,15 @@ export default function PromptGuesserGame({ game }) {
       drawn = null
     }
     if (isStale(t)) return
+    if (!flow.send(drawn ? 'DRAWN' : 'DRAW_FAILED')) return
     setGuessUrl(drawn)
 
     // 2. Ask the judge how close the two images look.
     let verdict = { score: null, comment: '' }
     if (drawn) {
-      setPhase('judging')
       verdict = await judge('match-image', { targetUrl: imageUrl, imageUrl: drawn })
       if (isStale(t)) return
+      if (!flow.send('JUDGED')) return
     }
 
     const judged = verdict.score != null
@@ -140,11 +145,10 @@ export default function PromptGuesserGame({ game }) {
       pts,
     })
     recordScore(pts)
-    setPhase('result')
   }
 
   const showHint = () => {
-    if (hintUsed || !hiddenPrompt) return
+    if (hintUsed || !hiddenPrompt || !flow.is('guessing')) return
     const words = hiddenPrompt.split(' ')
     // Only reveal content words (4+ characters), never filler like "a" or "the"
     const contentIndices = words
@@ -163,7 +167,7 @@ export default function PromptGuesserGame({ game }) {
     setGuessUrl(null)
     setHiddenPrompt(null)
     setResult(null)
-    setPhase('idle')
+    flow.send(round >= MAX_ROUNDS ? 'FINISH' : 'NEXT')
   }
 
   const handleRestart = () => {
@@ -177,12 +181,12 @@ export default function PromptGuesserGame({ game }) {
     setHintUsed(false)
     setHint('')
     setUsedPrompts([])
-    setPhase('idle')
+    flow.send('RESTART')
   }
 
   if (gameOver) {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4" {...flow.attrs}>
         <GameOverCard
           emoji="🏆"
           title="Game Over!"
@@ -197,7 +201,7 @@ export default function PromptGuesserGame({ game }) {
   const busy = phase === 'drawing' || phase === 'judging'
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" {...flow.attrs}>
       <StatsBar
         stats={[
           { label: 'Round', value: `${round}/${MAX_ROUNDS}` },

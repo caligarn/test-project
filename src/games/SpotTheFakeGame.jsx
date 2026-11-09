@@ -3,6 +3,8 @@ import { useAuth } from '../context/AuthContext'
 import { generateImage, generateImageVariations } from '../lib/fal'
 import { useGameRounds } from '../hooks/useGameRounds'
 import { useRoundTimer } from '../hooks/useRoundTimer'
+import { useMachine } from '../hooks/useMachine'
+import { spotTheFakeMachine } from '../machines/spotTheFake'
 import { pickRandom, shuffle, preloadImages } from '../lib/similarity'
 import StatsBar from '../components/game/StatsBar'
 import GameOverCard from '../components/game/GameOverCard'
@@ -40,7 +42,8 @@ export default function SpotTheFakeGame({ game }) {
   const { round, totalScore, gameOver, token, isStale, recordScore, nextRound, restart } =
     useGameRounds({ gameId: game.id, username, maxRounds: MAX_ROUNDS })
   const [streak, setStreak] = useState(0)
-  const [phase, setPhase] = useState('idle') // idle, loading, playing, result
+  const flow = useMachine(spotTheFakeMachine) // see src/machines/spotTheFake.js
+  const phase = flow.state
   const [images, setImages] = useState([]) // { url, isFake }
   const [selected, setSelected] = useState(null)
   const [roundPts, setRoundPts] = useState(0)
@@ -49,17 +52,16 @@ export default function SpotTheFakeGame({ game }) {
   const [pair, setPair] = useState(null)
 
   const { timeLeft, start: startTimer, stop: stopTimer } = useRoundTimer(() => {
-    // Time ran out
-    if (phase !== 'playing') return
+    // Time ran out. Ignored unless a round is being played (the player may have just answered).
+    if (!flow.send('TIMEOUT')) return
     setSelected(-1) // timeout
     setStreak(0)
     setRoundPts(0)
     recordScore(0)
-    setPhase('result')
   })
 
   const startRound = async () => {
-    setPhase('loading')
+    if (!flow.send('START')) return
     setError(null)
     setSelected(null)
 
@@ -83,22 +85,23 @@ export default function SpotTheFakeGame({ game }) {
       // Preload all 4 before the clock starts
       await preloadImages(items.map(img => img.url))
       if (isStale(t)) return
+      if (!flow.send('LOADED')) return
 
       // Only consume the prompts once generation succeeded
       setUsedRounds(prev => [...prev, picked])
       setPair(picked)
       setImages(items)
-      setPhase('playing')
       startTimer(TIME_PER_ROUND)
     } catch {
       if (isStale(t)) return
+      if (!flow.send('LOAD_FAILED')) return
       setError('Could not make the images. Try again.')
-      setPhase('idle')
     }
   }
 
   const handleSelect = (index) => {
-    if (selected !== null || phase !== 'playing') return
+    // One answer per round; a tap after the timer ran out is ignored
+    if (!flow.send('ANSWER')) return
     stopTimer()
     setSelected(index)
 
@@ -109,7 +112,6 @@ export default function SpotTheFakeGame({ game }) {
     setStreak(isCorrect ? streak + 1 : 0)
     setRoundPts(pts)
     recordScore(pts)
-    setPhase('result')
   }
 
   const handleNextRound = () => {
@@ -117,7 +119,7 @@ export default function SpotTheFakeGame({ game }) {
     nextRound()
     setImages([])
     setSelected(null)
-    setPhase('idle')
+    flow.send(round >= MAX_ROUNDS ? 'FINISH' : 'NEXT')
   }
 
   const handleRestart = () => {
@@ -130,12 +132,12 @@ export default function SpotTheFakeGame({ game }) {
     setError(null)
     setUsedRounds([])
     setPair(null)
-    setPhase('idle')
+    flow.send('RESTART')
   }
 
   if (gameOver) {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4" {...flow.attrs}>
         <GameOverCard
           emoji="🕵️"
           title="Investigation Complete!"
@@ -159,7 +161,7 @@ export default function SpotTheFakeGame({ game }) {
   ]
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" {...flow.attrs}>
       <StatsBar stats={stats} />
 
       <ErrorBanner message={error} />

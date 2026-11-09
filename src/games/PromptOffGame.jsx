@@ -5,6 +5,8 @@ import { useState, useRef, useEffect, useEffectEvent, useMemo } from 'react'
 import { generateFromSketch, generateImage } from '../lib/fal'
 import { addScore } from '../lib/storage'
 import { useAuth } from '../context/AuthContext'
+import { useMachine } from '../hooks/useMachine'
+import { promptOffMachine } from '../machines/promptOff'
 import { FINAL_WAIT_MS, matchResult, newEndsAt, pickPrompt } from './promptoff/constants'
 import { useDuelConnection } from './promptoff/useDuelConnection'
 import { useVoteRoom } from './promptoff/useVoteRoom'
@@ -21,8 +23,9 @@ export default function PromptOffGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
 
-  // lobby | waiting | countdown | playing | generating | voting
-  const [phase, setPhase] = useState('lobby')
+  // lobby | waiting | countdown | playing | generating | voting | results
+  const flow = useMachine(promptOffMachine) // see src/machines/promptOff.js
+  const phase = flow.state
   const [isHost, setIsHost] = useState(false)
   const [opponentName, setOpponentName] = useState('Opponent')
 
@@ -41,7 +44,6 @@ export default function PromptOffGame({ game }) {
 
   const canvasRef = useRef(null)
   const hasDrawnRef = useRef(false)
-  const scoredMatchRef = useRef(-1)
   const current = useLatestRef({ matchId, myLiveUrl })
 
   // ---------- CONNECTION ----------
@@ -51,21 +53,24 @@ export default function PromptOffGame({ game }) {
     accepting: phase === 'waiting',
     onMessage: handleMessage,
     onClosed() {
-      if (phase === 'playing' || phase === 'countdown' || (!isHost && phase === 'waiting')) {
-        duel.leave(isHost ? 'Opponent disconnected!' : 'The host left the room.')
-        setPhase('lobby')
-      }
+      // A host in the room keeps waiting for a new opponent; otherwise the match is over.
+      // After the round (generating, voting, results) both keep their screen.
+      if (isHost && phase === 'waiting') return
+      if (flow.send('DISCONNECTED')) duel.leave(isHost ? 'Opponent disconnected!' : 'The host left the room.')
     },
-    onFailed: () => setPhase('lobby'),
+    onFailed: () => flow.send('FAILED'),
   })
 
+  // Messages that change the step are machine events: a late or repeated one
+  // is ignored, so it cannot move this device back. The rest is match data,
+  // cleared when the next match begins (protocol: promptoff/constants.js).
   function handleMessage(msg) {
     switch (msg.type) {
       case 'hello':
         setOpponentName(String(msg.name || 'Opponent'))
         break
-      case 'start':
-        beginMatch(msg.prompt, msg.endsAt || newEndsAt())
+      case 'start': // host -> guest
+        if (!isHost && flow.send('HOST_STARTED')) beginMatch(msg.prompt, msg.endsAt || newEndsAt())
         break
       case 'live':
         setOpponentLiveUrl(msg.url)
@@ -73,17 +78,18 @@ export default function PromptOffGame({ game }) {
       case 'final':
         setOpponentFinal({ url: msg.url || '', prompt: msg.prompt || '' })
         break
-      case 'vote-room':
+      case 'vote-room': // host -> guest
         setGuestVoteCode(msg.code)
         break
-      case 'vote-results':
-        if (!isHost && msg.results) {
-          setGuestVotes({ A: msg.results.votesA || 0, B: msg.results.votesB || 0 })
-          finishMatch({ A: msg.results.votesA || 0, B: msg.results.votesB || 0 })
+      case 'vote-results': // host -> guest
+        if (!isHost && msg.results && flow.send('RESULTS_RECEIVED')) {
+          const finalVotes = { A: msg.results.votesA || 0, B: msg.results.votesB || 0 }
+          setGuestVotes(finalVotes)
+          scoreMatch(finalVotes)
         }
         break
       case 'rematch':
-        resetMatch()
+        if (flow.send('REMATCH')) resetMatch()
         break
       default:
         break
@@ -91,27 +97,27 @@ export default function PromptOffGame({ game }) {
   }
 
   function createRoom() {
+    if (!flow.send('CREATE')) return
     setIsHost(true)
-    setPhase('waiting')
     duel.create()
   }
 
   function joinRoom(code) {
+    if (!flow.send('JOIN')) return
     setIsHost(false)
-    setPhase('waiting')
     duel.join(code)
   }
 
   function leaveRoom() {
+    if (!flow.send('LEAVE')) return
     duel.leave()
     resetMatch()
-    setPhase('lobby')
   }
 
   // ---------- MATCH FLOW ----------
 
+  // Clears the match data (the step itself is the machine's job).
   function resetMatch() {
-    setPhase('waiting')
     setTargetPrompt('')
     setMyPrompt('')
     setMyLiveUrl(null)
@@ -129,10 +135,10 @@ export default function PromptOffGame({ game }) {
     setMatchId((m) => m + 1)
     setTargetPrompt(prompt)
     setEndsAt(matchEndsAt)
-    setPhase('countdown')
   }
 
   function startGame() {
+    if (!flow.send('START')) return
     const prompt = pickPrompt()
     const matchEndsAt = newEndsAt()
     duel.send({ type: 'start', prompt, endsAt: matchEndsAt })
@@ -140,6 +146,7 @@ export default function PromptOffGame({ game }) {
   }
 
   function requestRematch() {
+    if (!flow.send('REMATCH')) return
     duel.send({ type: 'rematch' })
     resetMatch()
   }
@@ -181,12 +188,12 @@ export default function PromptOffGame({ game }) {
     duel.send({ type: 'final', url, prompt })
   }
 
-  function submitFinal(promptText) {
-    if (phase !== 'playing') return
+  // event: SUBMIT (early) or TIME_UP. Only the first one counts.
+  function submitFinal(event, promptText) {
+    if (!flow.send(event)) return
     const id = matchId
     const canvas = canvasRef.current
     const sketch = hasDrawnRef.current && canvas ? canvas.toDataURL('image/jpeg', 0.6) : null
-    setPhase('generating')
     setMyFinalPrompt(promptText)
     // If the credit modal is open, this waits for the answer; a late image
     // still replaces the fallback below (and reaches the voters).
@@ -200,22 +207,22 @@ export default function PromptOffGame({ game }) {
   }
 
   function submitEarly() {
-    if (myPrompt.trim()) submitFinal(myPrompt.trim())
+    if (myPrompt.trim()) submitFinal('SUBMIT', myPrompt.trim())
   }
 
   const clock = useMatchClock({
     phase,
     endsAt,
-    onCountdownDone: () => setPhase('playing'),
-    onTimeUp: () => submitFinal(myPrompt.trim() || 'abstract art'),
+    onCountdownDone: () => flow.send('COUNTDOWN_DONE'),
+    onTimeUp: () => submitFinal('TIME_UP', myPrompt.trim() || 'abstract art'),
   })
 
   // Move to voting when both finals are in, or after FINAL_WAIT_MS.
   const bothFinal = myFinal !== null && opponentFinal !== null
   const onFinalWaitOver = useEffectEvent(() => {
+    if (!flow.send('OPEN_VOTING')) return
     if (!myFinal) sendFinal(myLiveUrl || '', myFinalPrompt || myPrompt.trim() || 'No prompt')
     if (!opponentFinal && opponentLiveUrl) setOpponentFinal({ url: opponentLiveUrl, prompt: '(timed out)' })
-    setPhase('voting')
   })
   useEffect(() => {
     if (phase !== 'generating') return
@@ -224,6 +231,7 @@ export default function PromptOffGame({ game }) {
   }, [phase, bothFinal])
 
   // ---------- AUDIENCE VOTING ----------
+  // The host keeps the vote room open in results too, so late viewers see them.
 
   const myImage = myFinal?.url || myLiveUrl || ''
   const opponentImage = opponentFinal?.url || opponentLiveUrl || ''
@@ -232,43 +240,38 @@ export default function PromptOffGame({ game }) {
     [targetPrompt, isHost, myImage, opponentImage, username, opponentName]
   )
   const voteRoom = useVoteRoom({
-    active: phase === 'voting' && isHost,
+    active: flow.is('voting', 'results') && isHost,
     matchId,
     voteData,
     onReady: (code) => duel.send({ type: 'vote-room', code }),
   })
 
   const votes = isHost ? voteRoom.votes : guestVotes || NO_VOTES
-  const votingClosed = isHost ? voteRoom.closed : guestVotes !== null
+  const votingClosed = flow.is('results')
   const voteCode = isHost ? voteRoom.code : guestVoteCode
 
-  function finishMatch(finalVotes) {
-    if (scoredMatchRef.current === matchId) return // once per match
-    scoredMatchRef.current = matchId
+  // Runs on entering results, so once per match.
+  function scoreMatch(finalVotes) {
     const { result, points, mine, theirs } = matchResult(finalVotes, isHost)
     addScore(game.id, username, points, { prompt: targetPrompt, result, myVotes: mine, theirVotes: theirs })
   }
 
   function closeVoting() {
+    if (!isHost || !flow.send('CLOSE_VOTING')) return
     const results = voteRoom.close()
     duel.send({ type: 'vote-results', results })
-    finishMatch({ A: results.votesA, B: results.votesB })
+    scoreMatch({ A: results.votesA, B: results.votesB })
   }
 
   // ==================== RENDER ====================
 
-  if (phase === 'lobby') return <LobbyView error={duel.error} onCreate={createRoom} onJoin={joinRoom} />
-
-  if (phase === 'waiting') {
-    return (
-      <WaitingView isHost={isHost} connected={duel.connected} roomCode={duel.roomCode} opponentName={opponentName} onStart={startGame} onLeave={leaveRoom} />
-    )
-  }
-
-  if (phase === 'countdown') return <CountdownView count={clock.countdown} />
-
-  if (phase === 'playing') {
-    return (
+  let view = null
+  if (phase === 'lobby') view = <LobbyView error={duel.error} onCreate={createRoom} onJoin={joinRoom} />
+  else if (phase === 'waiting') {
+    view = <WaitingView isHost={isHost} connected={duel.connected} roomCode={duel.roomCode} opponentName={opponentName} onStart={startGame} onLeave={leaveRoom} />
+  } else if (phase === 'countdown') view = <CountdownView count={clock.countdown} />
+  else if (phase === 'playing') {
+    view = (
       <PlayingView
         targetPrompt={targetPrompt}
         timeLeft={clock.timeLeft}
@@ -286,16 +289,12 @@ export default function PromptOffGame({ game }) {
         onRetryCredit={live.retry}
       />
     )
-  }
-
-  if (phase === 'generating') {
-    return (
+  } else if (phase === 'generating') {
+    view = (
       <GeneratingView username={username} opponentName={opponentName} myImage={myImage} myDone={myFinal !== null} opponentImage={opponentImage} opponentDone={opponentFinal !== null} />
     )
-  }
-
-  if (phase === 'voting') {
-    return (
+  } else if (phase === 'voting' || phase === 'results') {
+    view = (
       <VotingView
         targetPrompt={targetPrompt}
         isHost={isHost}
@@ -315,5 +314,10 @@ export default function PromptOffGame({ game }) {
     )
   }
 
-  return null
+  // data-machine="prompt-off" (the match) wraps data-machine="prompt-off-link" (the PeerJS link).
+  return (
+    <div {...flow.attrs}>
+      <div {...duel.attrs}>{view}</div>
+    </div>
+  )
 }

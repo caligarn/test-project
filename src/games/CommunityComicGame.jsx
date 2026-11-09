@@ -3,6 +3,8 @@ import { addScore } from '../lib/storage'
 import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
 import { useSharedGallery } from '../hooks/useSharedGallery'
+import { useMachine } from '../hooks/useMachine'
+import { communityComicMachine } from '../machines/communityComic.js'
 import ErrorBanner from '../components/game/ErrorBanner'
 import GameImage from '../components/game/GameImage'
 import { BookOpen, Plus, ChevronLeft, ChevronRight, X } from 'lucide-react'
@@ -63,11 +65,12 @@ export default function CommunityComicGame({ game }) {
   const pts = game.pointsPerAction || 80
   const gallery = useSharedGallery('community-comic', { limit: 100 })
   const [page, setPage] = useState(null) // null = follow the newest page
-  const [showForm, setShowForm] = useState(false)
+  const flow = useMachine(communityComicMachine) // see src/machines/communityComic.js
+  const showForm = !flow.is('reading')
+  const generating = flow.is('drawing', 'adding')
   const [text, setText] = useState('')
-  const [generating, setGenerating] = useState(false)
   const [error, setError] = useState(null)
-  const [zoom, setZoom] = useState(null)
+  const [zoom, setZoom] = useState(null) // lightbox: independent of the add-panel flow
   const session = useSessionScore(game.id, username)
 
   const aliveRef = useRef(true)
@@ -100,7 +103,8 @@ export default function CommunityComicGame({ game }) {
   }, [zoom])
 
   const openForm = () => {
-    setShowForm(true)
+    // Ignored while a panel is being drawn.
+    if (!flow.send('OPEN')) return
     setError(null)
     gallery.reload() // make sure we continue from the real latest panel
   }
@@ -108,8 +112,9 @@ export default function CommunityComicGame({ game }) {
   const handleCreate = async (e) => {
     e.preventDefault()
     const scene = text.trim().slice(0, TEXT_MAX)
-    if (!scene || generating) return
-    setGenerating(true)
+    if (!scene) return
+    // Only allowed from the open form: a second tap while drawing is ignored.
+    if (!flow.send('SUBMIT')) return
     setError(null)
 
     // Continuity: the previous panel matters most, earlier ones set the scene.
@@ -128,22 +133,22 @@ export default function CommunityComicGame({ game }) {
     } catch (err) {
       if (aliveRef.current) {
         setError(errorText(err, 'Image generation failed. Please try again.'))
-        setGenerating(false)
+        flow.send('DRAW_FAILED')
       }
       return
     }
-    if (!aliveRef.current) return
+    if (!aliveRef.current || !flow.send('DRAWN')) return
     try {
       await gallery.add({ imageUrl: url, text: scene, meta: previous ? { after: previous.id } : {} })
       if (!aliveRef.current) return
       session.award(pts)
       setText('')
-      setShowForm(false)
       setPage(null) // jump to the newest page
+      flow.send('ADDED')
     } catch (err) {
-      if (aliveRef.current) setError(errorText(err, 'Could not add your panel to the comic. Please try again.'))
-    } finally {
-      if (aliveRef.current) setGenerating(false)
+      if (!aliveRef.current) return
+      setError(errorText(err, 'Could not add your panel to the comic. Please try again.'))
+      flow.send('ADD_FAILED')
     }
   }
 
@@ -156,7 +161,7 @@ export default function CommunityComicGame({ game }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" {...flow.attrs}>
       {/* Header bar */}
       <div className="brutalist-card p-3 sm:p-4 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -196,7 +201,7 @@ export default function CommunityComicGame({ game }) {
         <div className="brutalist-card p-4 sm:p-6 flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <h3 className="font-black text-navy uppercase text-sm">Add Panel #{panels.length + 1}</h3>
-            <button onClick={() => setShowForm(false)} aria-label="Close" className="text-navy/40 hover:text-navy"><X className="w-4 h-4" /></button>
+            <button onClick={() => flow.send('CLOSE')} disabled={generating} aria-label="Close" className="text-navy/40 hover:text-navy disabled:opacity-30"><X className="w-4 h-4" /></button>
           </div>
           {recent.length > 0 ? (
             <div className="p-3 bg-gray-50" style={{ border: '2px solid #e5e7eb' }}>
@@ -230,8 +235,8 @@ export default function CommunityComicGame({ game }) {
             </div>
             <p className="text-xs text-navy/40 font-medium">The AI draws your panel using the last panel as context, so the story stays connected.</p>
             <div className="flex gap-2">
-              <button type="button" onClick={() => setShowForm(false)}
-                className="flex-1 py-2 text-navy text-sm font-black uppercase hover:bg-gray-100"
+              <button type="button" onClick={() => flow.send('CLOSE')} disabled={generating}
+                className="flex-1 py-2 text-navy text-sm font-black uppercase hover:bg-gray-100 disabled:opacity-40"
                 style={{ border: '2px solid #1A1A2E' }}>Cancel</button>
               <button type="submit" disabled={!text.trim() || generating}
                 className="flex-1 py-2 text-white text-sm font-black uppercase disabled:opacity-40"

@@ -3,15 +3,17 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { createPeer } from '../lib/peer'
+import { useMachine } from '../hooks/useMachine'
+import { promptOffVoteMachine } from '../machines/promptOffVote'
 import GameImage from '../components/game/GameImage'
 
 const A_COLOR = '#C8FF00'
 const B_COLOR = '#FF2D55'
 const CONNECT_TIMEOUT_MS = 10000
 
-function Centered({ children }) {
+function Centered({ children, ...attrs }) {
   return (
-    <div className="flex items-center justify-center px-4" style={{ minHeight: '60vh' }}>
+    <div {...attrs} className="flex items-center justify-center px-4" style={{ minHeight: '60vh' }}>
       <div className="text-center max-w-sm">{children}</div>
     </div>
   )
@@ -56,20 +58,22 @@ function VoteBar({ votes, total, color, textOnFill }) {
 
 export default function VotePage() {
   const { code } = useParams()
-  const [status, setStatus] = useState('connecting') // connecting | voting | voted | results | error
+  // connecting | voting | voted | results | closed | error
+  const flow = useMachine(promptOffVoteMachine) // see src/machines/promptOffVote.js
+  const status = flow.state
+  const send = flow.send
   const [data, setData] = useState({ prompt: '', imageA: null, imageB: null, labelA: 'Player 1', labelB: 'Player 2' })
   const [myVote, setMyVote] = useState(null)
   const [results, setResults] = useState(null)
-  const [roomClosed, setRoomClosed] = useState(false)
   const connRef = useRef(null)
 
   useEffect(() => {
     if (!code) return
     let disposed = false
     let timer = null
-    // Keep showing the results if they already arrived.
+    // Ignored once the results are in: they stay on screen.
     const fail = () => {
-      if (!disposed) setStatus((s) => (s === 'results' ? s : 'error'))
+      if (!disposed) send('FAILED')
     }
     const peer = createPeer()
 
@@ -91,15 +95,16 @@ export default function VotePage() {
             labelA: msg.labelA || 'Player 1',
             labelB: msg.labelB || 'Player 2',
           })
-          // The host re-sends vote-data when final images land: keep a cast vote.
-          setStatus((s) => (s === 'connecting' ? 'voting' : s))
+          // The host re-sends vote-data when final images land: this only
+          // moves on from connecting, so a cast vote is kept.
+          send('VOTE_DATA')
         } else if (msg.type === 'vote-results' && msg.results) {
           setResults(msg.results)
-          setStatus('results')
+          send('RESULTS')
         }
       })
       conn.on('close', () => {
-        if (!disposed) setRoomClosed(true)
+        if (!disposed) send('ROOM_CLOSED')
       })
       conn.on('error', () => fail())
       timer = setTimeout(() => {
@@ -118,21 +123,19 @@ export default function VotePage() {
         // ignore
       }
     }
-  }, [code])
+  }, [code, send])
 
   function vote(choice) {
-    if (results || myVote) return // one vote, and none after the results
+    if (!send('VOTE')) return // one vote, and none after the results
     setMyVote(choice)
     if (connRef.current?.open) connRef.current.send({ type: 'vote', vote: choice })
-    setStatus('voted')
   }
 
   const { prompt, imageA, imageB, labelA, labelB } = data
 
-  // A room that closes before the results is an error; after them, keep showing them.
-  if (status === 'error' || (roomClosed && status !== 'results' && status !== 'connecting')) {
+  if (status === 'error' || status === 'closed') {
     return (
-      <Centered>
+      <Centered {...flow.attrs}>
         <p className="text-5xl mb-4">😔</p>
         <h2 className="text-xl font-black text-navy uppercase mb-2">{status === 'error' ? "Can't Connect" : 'Voting Closed'}</h2>
         <p className="text-navy/50 text-sm font-medium">The voting room may have closed. Ask the host for a new code.</p>
@@ -142,7 +145,7 @@ export default function VotePage() {
 
   if (status === 'connecting') {
     return (
-      <Centered>
+      <Centered {...flow.attrs}>
         <Spinner />
         <h2 className="text-xl font-black text-navy uppercase mt-4 mb-2">Joining Vote Room</h2>
         <p className="text-navy/50 text-sm font-medium">Connecting to {code}...</p>
@@ -160,7 +163,7 @@ export default function VotePage() {
 
   if (status === 'voting') {
     return (
-      <div className="flex flex-col gap-4 max-w-3xl mx-auto px-4 py-6">
+      <div {...flow.attrs} className="flex flex-col gap-4 max-w-3xl mx-auto px-4 py-6">
         {header}
         <p className="text-sm text-navy/60 font-bold uppercase text-center">Tap the image you think is better!</p>
         <div className="grid grid-cols-2 gap-3 sm:gap-4">
@@ -187,7 +190,7 @@ export default function VotePage() {
 
   if (status === 'voted') {
     return (
-      <div className="flex flex-col gap-4 max-w-3xl mx-auto px-4 py-6">
+      <div {...flow.attrs} className="flex flex-col gap-4 max-w-3xl mx-auto px-4 py-6">
         <div className="text-center">
           <p className="text-5xl mb-3">🗳️</p>
           <h2 className="text-xl font-black text-navy uppercase mb-2">Vote Cast!</h2>
@@ -215,7 +218,7 @@ export default function VotePage() {
     const total = votesA + votesB
     const winner = votesA > votesB ? 'A' : votesB > votesA ? 'B' : null
     return (
-      <div className="flex flex-col gap-4 max-w-3xl mx-auto px-4 py-6">
+      <div {...flow.attrs} className="flex flex-col gap-4 max-w-3xl mx-auto px-4 py-6">
         <div className="text-center">
           <p className="text-5xl mb-3">🏆</p>
           <h2 className="text-2xl font-black text-navy uppercase mb-1">{winner ? `${winner === 'A' ? labelA : labelB} Wins!` : "It's a Tie!"}</h2>

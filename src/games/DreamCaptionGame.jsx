@@ -2,6 +2,10 @@ import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { generateImage, judge } from '../lib/fal'
 import { useGameRounds } from '../hooks/useGameRounds'
+import { useMachine } from '../hooks/useMachine'
+import { dreamCaptionMachine } from '../machines/dreamCaption.js'
+import { dreamPickMachine } from '../machines/dreamPick.js'
+import { partyEntryMachine } from '../machines/partyEntry.js'
 import { useSharedGallery } from '../hooks/useSharedGallery'
 import { pickRandom } from '../lib/similarity'
 import StatsBar from '../components/game/StatsBar'
@@ -76,11 +80,12 @@ export default function DreamCaptionGame({ game }) {
 function DreamCaptionSolo({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
-  const { round, totalScore, gameOver, token, isStale, recordScore, nextRound, restart } =
+  const { round, totalScore, token, isStale, recordScore, nextRound, restart } =
     useGameRounds({ gameId: game.id, username, maxRounds: MAX_ROUNDS })
   const gallery = useSharedGallery(game.id)
   const [myPosts, setMyPosts] = useState(loadMyPosts)
-  const [phase, setPhase] = useState('idle') // idle, generating, captioning, judging, result
+  const flow = useMachine(dreamCaptionMachine) // see src/machines/dreamCaption.js
+  const phase = flow.state
   const [imageUrl, setImageUrl] = useState(null)
   const [caption, setCaption] = useState('')
   const [error, setError] = useState(null)
@@ -89,7 +94,7 @@ function DreamCaptionSolo({ game }) {
   const [usedPrompts, setUsedPrompts] = useState([])
 
   const generateDream = async () => {
-    setPhase('generating')
+    if (!flow.send('GENERATE')) return
     setError(null)
     setCaption('')
     setResult(null)
@@ -98,30 +103,27 @@ function DreamCaptionSolo({ game }) {
     const t = token()
     try {
       const url = await generateImage(dreamPrompt(p))
-      if (isStale(t)) return
+      if (isStale(t) || !flow.send('DREAMED')) return
       setImageUrl(url)
-      setPhase('captioning')
     } catch (err) {
-      if (isStale(t)) return
+      if (isStale(t) || !flow.send('DREAM_FAILED')) return
       setError(err?.message || 'Image generation failed.')
-      setPhase('idle')
     }
   }
 
   const submitCaption = async (e) => {
     e.preventDefault()
     const text = caption.trim()
-    if (!text) return
-    setPhase('judging')
+    // Only one submit per image: a second Enter while judging is ignored.
+    if (!text || !flow.send('SUBMIT')) return
     const t = token()
     const verdict = await judge('caption', { imageUrl, text })
-    if (isStale(t)) return
+    if (isStale(t) || !flow.send('JUDGED')) return
     const judged = verdict.score != null
     const pts = judged ? Math.round(verdict.score * POINTS_PER_JUDGE_POINT) : FALLBACK_POINTS
     recordScore(pts)
     setHistory((h) => [...h, { imageUrl, caption: text, pts }])
     setResult({ pts, score: verdict.score, comment: judged ? verdict.comment : '', posted: null })
-    setPhase('result')
     try {
       const item = await gallery.add({ imageUrl, text, meta: { round } })
       const ids = [...loadMyPosts(), item.id]
@@ -134,10 +136,11 @@ function DreamCaptionSolo({ game }) {
   }
 
   const handleNext = () => {
+    // A double tap must not skip a round: only the first NEXT/FINISH counts.
+    if (!flow.send(round >= MAX_ROUNDS ? 'FINISH' : 'NEXT')) return
     nextRound()
     setImageUrl(null)
     setResult(null)
-    setPhase('idle')
   }
 
   const handleRestart = () => {
@@ -147,15 +150,15 @@ function DreamCaptionSolo({ game }) {
     setResult(null)
     setHistory([])
     setError(null)
-    setPhase('idle')
+    flow.send('RESTART')
   }
 
   const isMine = (entry) =>
     myPosts.includes(entry.id) || (!!user?.username && !!entry.username && entry.username.toLowerCase() === user.username.toLowerCase())
 
   return (
-    <div className="flex flex-col gap-4">
-      {gameOver ? (
+    <div className="flex flex-col gap-4" {...flow.attrs}>
+      {phase === 'over' ? (
         <GameOverCard emoji="💭" title="Dreams captioned!" score={`${totalScore} pts`} subtitle={`${MAX_ROUNDS} rounds completed`} onRestart={handleRestart}>
           <div className="flex flex-col gap-2 text-left my-4">
             {history.map((h, i) => (
@@ -335,32 +338,31 @@ function DreamCaptionParty({ gameId }) {
 }
 
 function DreamPick({ round, onPick }) {
+  const flow = useMachine(dreamPickMachine) // see src/machines/dreamPick.js
   const [url, setUrl] = useState(null)
-  const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [used, setUsed] = useState([])
 
   const make = async () => {
-    setBusy(true)
+    if (!flow.send('GENERATE')) return
     setError(null)
     const p = pickRandom(DREAM_PROMPTS, used)
     setUsed((u) => [...u, p])
     try {
-      setUrl(await generateImage(dreamPrompt(p)))
+      const next = await generateImage(dreamPrompt(p))
+      if (flow.send('DREAMED')) setUrl(next)
     } catch (err) {
-      setError(err?.message || 'Image generation failed.')
-    } finally {
-      setBusy(false)
+      if (flow.send('FAILED')) setError(err?.message || 'Image generation failed.')
     }
   }
 
   return (
-    <div className="brutalist-card p-5 flex flex-col gap-4 items-center text-center">
+    <div className="brutalist-card p-5 flex flex-col gap-4 items-center text-center" {...flow.attrs}>
       <h3 className="font-black text-navy uppercase">Round {round}: make the dream</h3>
       <ErrorBanner message={error} />
-      {busy ? (
+      {flow.is('generating', 'regenerating') ? (
         <GeneratingSpinner label="Dreaming up something surreal..." color={COLOR} />
-      ) : url ? (
+      ) : flow.is('ready') ? (
         <>
           <div className="w-full max-w-sm" style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
             <GameImage eager src={url} alt="Dream preview" className="w-full object-cover" />
@@ -381,22 +383,22 @@ function DreamPick({ round, onPick }) {
 }
 
 function CaptionComposer({ challenge, onSubmit }) {
+  const flow = useMachine(partyEntryMachine) // see src/machines/partyEntry.js
+  const busy = !flow.is('composing')
   const [text, setText] = useState('')
-  const [busy, setBusy] = useState(false)
   const alive = useAlive()
 
   const submit = async (e) => {
     e.preventDefault()
     const caption = text.trim()
-    if (!caption || busy) return
-    setBusy(true)
+    if (!caption || !flow.send('SEND')) return
     const verdict = await judge('caption', { imageUrl: challenge.imageUrl, text: caption })
-    if (!alive.current) return
+    if (!alive.current || !flow.send('SENT')) return
     onSubmit({ text: caption, judgeScore: verdict.score, judgeComment: verdict.score != null ? verdict.comment : '' })
   }
 
   return (
-    <form onSubmit={submit} className="brutalist-card p-4 flex flex-col gap-3">
+    <form onSubmit={submit} className="brutalist-card p-4 flex flex-col gap-3" {...flow.attrs}>
       <h3 className="font-black text-navy uppercase text-sm">Your caption</h3>
       <textarea
         value={text}

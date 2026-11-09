@@ -71,3 +71,27 @@ export function useMachine(machine, { initial } = {}) {
 
   return { state, send, can, is, attrs: { 'data-machine': machine.id, 'data-state': state } }
 }
+
+/**
+ * For a machine whose state lives elsewhere (for example a party phase that
+ * the host keeps in shared room state and moves with machine.transition):
+ * reports it like useMachine does, without owning it.
+ *
+ *   const view = useMachineView(partyMachine, shared.phase)
+ *   <div {...view.attrs}>
+ */
+export function useMachineView(machine, state) {
+  useEffect(() => {
+    const reg = devRegistry()
+    if (!reg || !machine.states[state]) return
+    const entry = (reg[machine.id] ||= { history: [] })
+    if (entry.state !== undefined && entry.state !== state) {
+      entry.history = [...entry.history, { from: entry.state, event: '(shared)', to: state, at: Date.now() }].slice(-30)
+    }
+    entry.state = state
+    entry.allowed = machine.eventsFrom(state)
+    entry.description = machine.description
+    entry.shared = true
+  }, [machine, state])
+  return { attrs: { 'data-machine': machine.id, 'data-state': state } }
+}

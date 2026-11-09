@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { createPeer, makeRoomCode } from '../../lib/peer'
+import { useMachine } from '../../hooks/useMachine'
+import { duelLinkMachine } from '../../machines/duelLink'
 import { gamePeerId, JOIN_TIMEOUT_MS, ROOM_CODE_LENGTH } from './constants'
 import { useLatestRef } from './useLatestRef'
 
@@ -10,6 +12,9 @@ const isTransient = (err) => err.type === 'network' || err.type === 'disconnecte
  * The host owns peer id `promptoff-<code>` and accepts one opponent while
  * `accepting` is true; the guest connects to it.
  *
+ * The link's step (hosting, joining, connected...) is the machine in
+ * src/machines/duelLink.js; `connected` is true in its `connected` state.
+ *
  * Callbacks (always the latest version is used):
  *   onMessage(msg)       a message from the opponent
  *   onClosed()           the opponent's connection closed
@@ -17,7 +22,8 @@ const isTransient = (err) => err.type === 'network' || err.type === 'disconnecte
  */
 export function useDuelConnection({ username, accepting, onMessage, onClosed, onFailed }) {
   const [roomCode, setRoomCode] = useState('')
-  const [connected, setConnected] = useState(false)
+  const link = useMachine(duelLinkMachine) // see src/machines/duelLink.js
+  const sendLink = link.send
   const [error, setError] = useState(null)
   const peerRef = useRef(null)
   const connRef = useRef(null)
@@ -47,35 +53,38 @@ export function useDuelConnection({ username, accepting, onMessage, onClosed, on
 
   useEffect(() => teardown, [teardown])
 
-  /** End the session. An optional message is shown in the lobby. */
-  const leave = useCallback(
-    (message = null) => {
+  const end = useCallback(
+    (event, message) => {
       teardown()
-      setConnected(false)
+      sendLink(event)
       setError(message)
     },
-    [teardown]
+    [teardown, sendLink]
   )
+
+  /** End the session. An optional message is shown in the lobby. */
+  const leave = useCallback((message = null) => end('LEAVE', message), [end])
 
   const fail = useCallback(
     (peer, message) => {
       if (peerRef.current !== peer) return // an old session
-      leave(message)
+      end('FAILED', message)
       latest.current.onFailed?.(message)
     },
-    [leave, latest]
+    [end, latest]
   )
 
   const attach = useCallback(
-    (peer, conn) => {
+    // closedEvent: OPPONENT_LEFT for the host (the room stays open), HOST_LEFT for the guest.
+    (peer, conn, closedEvent) => {
       connRef.current = conn
       conn.on('open', () => {
-        if (peerRef.current !== peer) return
+        if (peerRef.current !== peer || connRef.current !== conn) return
         if (joinTimerRef.current) {
           clearTimeout(joinTimerRef.current)
           joinTimerRef.current = null
         }
-        setConnected(true)
+        if (!sendLink('OPENED')) return
         conn.send({ type: 'hello', name: latest.current.username })
       })
       conn.on('data', (msg) => {
@@ -85,14 +94,14 @@ export function useDuelConnection({ username, accepting, onMessage, onClosed, on
       conn.on('close', () => {
         if (peerRef.current !== peer || connRef.current !== conn) return
         connRef.current = null
-        setConnected(false)
+        sendLink(closedEvent)
         latest.current.onClosed?.()
       })
       conn.on('error', () => {
         if (peerRef.current === peer) setError('Connection error. Try again.')
       })
     },
-    [latest]
+    [latest, sendLink]
   )
 
   const handlePeerError = useCallback(
@@ -109,7 +118,7 @@ export function useDuelConnection({ username, accepting, onMessage, onClosed, on
   const create = useCallback(() => {
     teardown()
     setError(null)
-    setConnected(false)
+    sendLink('CREATE')
     const code = makeRoomCode(ROOM_CODE_LENGTH)
     setRoomCode(code)
     const peer = createPeer(gamePeerId(code))
@@ -120,12 +129,12 @@ export function useDuelConnection({ username, accepting, onMessage, onClosed, on
         conn.close()
         return
       }
-      attach(peer, conn)
+      attach(peer, conn, 'OPPONENT_LEFT')
     })
     peer.on('error', (err) =>
       handlePeerError(peer, err, err.type === 'unavailable-id' ? 'Room code taken. Try again.' : 'Connection failed. Check your network.')
     )
-  }, [teardown, attach, handlePeerError, latest])
+  }, [teardown, attach, handlePeerError, latest, sendLink])
 
   const join = useCallback(
     (rawCode) => {
@@ -133,13 +142,13 @@ export function useDuelConnection({ username, accepting, onMessage, onClosed, on
       if (!code) return
       teardown()
       setError(null)
-      setConnected(false)
-      setRoomCode(code)
+      sendLink('JOIN')
+        setRoomCode(code)
       const peer = createPeer()
       peerRef.current = peer
       peer.on('open', () => {
         if (peerRef.current !== peer) return
-        attach(peer, peer.connect(gamePeerId(code), { reliable: true }))
+        attach(peer, peer.connect(gamePeerId(code), { reliable: true }), 'HOST_LEFT')
         joinTimerRef.current = setTimeout(() => {
           joinTimerRef.current = null
           if (!connRef.current?.open) fail(peer, 'Could not connect. Check the room code.')
@@ -147,7 +156,7 @@ export function useDuelConnection({ username, accepting, onMessage, onClosed, on
       })
       peer.on('error', (err) => handlePeerError(peer, err, 'Could not connect. Check the room code.'))
     },
-    [teardown, attach, fail, handlePeerError]
+    [teardown, attach, fail, handlePeerError, sendLink]
   )
 
   const send = useCallback((msg) => {
@@ -160,5 +169,5 @@ export function useDuelConnection({ username, accepting, onMessage, onClosed, on
     }
   }, [])
 
-  return { roomCode, connected, error, setError, create, join, leave, send }
+  return { roomCode, connected: link.is('connected'), error, setError, create, join, leave, send, attrs: link.attrs }
 }

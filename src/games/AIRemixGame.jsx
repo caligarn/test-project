@@ -3,6 +3,8 @@ import { useAuth } from '../context/AuthContext'
 import { generateImage, editImage, judge } from '../lib/fal'
 import { useGameRounds } from '../hooks/useGameRounds'
 import { useLocalGallery } from '../hooks/useLocalGallery'
+import { useMachine } from '../hooks/useMachine'
+import { aiRemixMachine } from '../machines/aiRemix'
 import StatsBar from '../components/game/StatsBar'
 import ErrorBanner from '../components/game/ErrorBanner'
 import GeneratingSpinner from '../components/game/GeneratingSpinner'
@@ -39,7 +41,8 @@ export default function AIRemixGame({ game }) {
   const g = useGameRounds({ gameId: game.id, username, maxRounds: CHANGES })
   const { items: savedChains, add: addSavedChain } = useLocalGallery(STORAGE_KEY, { cap: 20, mode: 'prepend' })
 
-  const [phase, setPhase] = useState('start') // start, loading, editing, judging, remix, over
+  const flow = useMachine(aiRemixMachine) // see src/machines/aiRemix.js
+  const phase = flow.state
   const [steps, setSteps] = useState([]) // [{ text, url, score?, comment?, pts?, judged? }], steps[0] is the starter
   const [pendingUrl, setPendingUrl] = useState(null)
   const [draft, setDraft] = useState('')
@@ -49,64 +52,64 @@ export default function AIRemixGame({ game }) {
   const start = async (starter) => {
     const prompt = starter.trim()
     if (!prompt) return
+    if (!flow.send('START')) return
     g.restart()
     const t = g.token()
     setSteps([])
     setDraft('')
     setError(null)
-    setPhase('loading')
     try {
       const url = await generateImage(prompt)
       if (g.isStale(t)) return
+      if (!flow.send('LOADED')) return
       setSteps([{ text: prompt, url }])
-      setPhase('remix')
     } catch {
       if (g.isStale(t)) return
+      if (!flow.send('LOAD_FAILED')) return
       setError('Could not create the starting image. Try again.')
-      setPhase('start')
     }
   }
 
   const remix = async (e) => {
     e?.preventDefault()
     const tweak = draft.trim()
-    if (!tweak || phase !== 'remix') return
+    if (!tweak) return
+    // One change at a time: a second submit while editing or judging is ignored.
+    if (!flow.send('SUBMIT')) return
     const before = steps[steps.length - 1]
     const t = g.token()
     setError(null)
-    setPhase('editing')
     let url
     try {
       url = await editImage(tweak, before.url)
     } catch {
       if (g.isStale(t)) return
+      if (!flow.send('EDIT_FAILED')) return
       setError('The edit failed. Your change is still in the box, try again.')
-      setPhase('remix')
       return
     }
     if (g.isStale(t)) return
+    if (!flow.send('EDITED')) return
     setPendingUrl(url)
-    setPhase('judging')
     const verdict = await judge('edit', { beforeUrl: before.url, imageUrl: url, text: tweak })
     if (g.isStale(t)) return
     const judged = verdict.score != null
     const pts = pointsFor(verdict.score)
     const next = [...steps, { text: tweak, url, score: verdict.score, comment: judged ? verdict.comment : '', pts, judged }]
+    const done = next.length - 1 >= CHANGES
+    if (!flow.send(done ? 'FINISH' : 'JUDGED')) return
     setSteps(next)
     setPendingUrl(null)
     setDraft('')
     g.recordScore(pts)
     g.nextRound() // saves the total once, after the last change
-    if (next.length - 1 >= CHANGES) {
+    if (done) {
       addSavedChain({
         id: crypto.randomUUID(),
         steps: next.map((s) => ({ prompt: s.text, url: s.url })),
         author: username,
         score: g.totalScore + pts,
       })
-      setPhase('over')
-    } else {
-      setPhase('remix')
     }
   }
 
@@ -115,7 +118,7 @@ export default function AIRemixGame({ game }) {
     setSteps([])
     setDraft('')
     setError(null)
-    setPhase('start')
+    flow.send('RESTART')
   }
 
   const changesDone = Math.max(0, steps.length - 1)
@@ -151,7 +154,7 @@ export default function AIRemixGame({ game }) {
 
   if (phase === 'over') {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4" {...flow.attrs}>
         <GameOverCard emoji="🔄" title="Remix complete!" score={`${g.totalScore} pts`}
           subtitle={`${CHANGES} changes, from "${steps[0]?.text}" to this.`} onRestart={reset} restartLabel="New remix">
           {latest && (
@@ -169,7 +172,7 @@ export default function AIRemixGame({ game }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" {...flow.attrs}>
       <StatsBar stats={[
         { label: 'Changes', value: `${changesDone}/${CHANGES}` },
         { label: 'Last', value: lastChange ? `+${lastChange.pts}` : '-', color: CYAN },

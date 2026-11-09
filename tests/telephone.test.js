@@ -54,3 +54,63 @@ it('telephone party rules', () => {
   assert.deepEqual(L.soloScore({driftScore:null, wordScore:50}), {judged:false, driftPts:0, wordPts:150, total:150})
 
 })
+
+// The reducer moves the shared phase only along telephonePartyMachine edges.
+it('telephone party phases follow the machine', async () => {
+  const { telephonePartyMachine: M } = await import('../src/machines/telephoneParty.js')
+  const { reachableStates } = await import('../src/lib/machine.js')
+  assert.deepEqual([...reachableStates(M)].sort(), [...M.stateNames].sort())
+  assert.equal(L.LOBBY_STATE.phase, M.initial)
+  const players = ['a', 'b'].map((id, i) => ({ id, host: i === 0, connected: true }))
+  const step = (s, action, from = 'a') => {
+    const next = L.reduceParty(s, action, from, players)
+    if (next.phase !== s.phase) {
+      const allowed = M.eventsFrom(s.phase).map((e) => M.transition(s.phase, e))
+      assert.ok(allowed.includes(next.phase), `${s.phase} -> ${next.phase} is not a machine edge`)
+    }
+    return next
+  }
+  let s = step(L.LOBBY_STATE, { type: 'start' })
+  assert.equal(s.phase, 'play')
+  assert.equal(step(s, { type: 'start' }), s) // START is not allowed while playing
+  assert.equal(step(s, { type: 'startVote' }), s) // nor START_VOTE
+  for (let k = 0; k < s.steps; k++) {
+    for (const who of ['a', 'b']) {
+      const chain = L.chainForSeat(s.order.indexOf(who), s.step, 2)
+      s = step(s, { type: 'submit', step: s.step, chain, text: 'x', imageUrl: 'u' }, who)
+    }
+  }
+  assert.equal(s.phase, 'reveal')
+  assert.equal(step(s, { type: 'finish' }), s) // FINISH only in vote
+  assert.equal(step(s, { type: 'startVote' }, 'b'), s) // host only
+  s = step(s, { type: 'startVote' })
+  assert.equal(s.phase, 'vote')
+  s = step(s, { type: 'vote', chain: 1 }, 'a')
+  assert.equal(s.phase, 'vote')
+  const finished = step(s, { type: 'finish' })
+  assert.equal(finished.phase, 'done')
+  s = step(s, { type: 'vote', chain: 0 }, 'b')
+  assert.equal(s.phase, 'done')
+  assert.equal(step(s, { type: 'start' }).phase, 'play') // play again straight from done
+  // NEW_GAME is global: back to the lobby from any phase, gameNo kept
+  for (const phase of M.stateNames) {
+    const back = step({ ...s, phase }, { type: 'newGame' })
+    assert.equal(back.phase, 'lobby')
+    assert.equal(back.gameNo, s.gameNo)
+  }
+})
+
+it('telephone solo and turn machines', async () => {
+  const { telephoneSoloMachine: S } = await import('../src/machines/telephoneSolo.js')
+  const { telephoneTurnMachine: T } = await import('../src/machines/telephoneTurn.js')
+  const run = (m, events) => events.reduce((st, e) => m.transition(st, e) ?? `x:${st}:${e}`, m.initial)
+  assert.equal(run(S, ['START', 'DRAWN', 'SUBMIT', 'DRAWN', 'SUBMIT', 'DRAWN_LAST', 'JUDGED']), 'over')
+  assert.equal(run(S, ['START', 'START_FAILED']), 'idle')
+  assert.equal(run(S, ['START', 'DRAWN', 'SUBMIT', 'DRAW_FAILED']), 'describe')
+  assert.equal(S.transition('loading', 'SUBMIT'), null) // no double submit
+  assert.equal(S.transition('over', 'START'), null) // play again goes through RESTART
+  assert.equal(run(S, ['START', 'DRAWN', 'RESTART', 'START']), 'loading')
+  assert.equal(run(T, ['SUBMIT', 'DRAW_FAILED', 'SUBMIT', 'DRAWN']), 'sent')
+  assert.equal(T.transition('drawing', 'SUBMIT'), null)
+  assert.equal(T.transition('sent', 'SUBMIT'), null)
+})

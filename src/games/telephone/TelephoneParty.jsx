@@ -2,6 +2,9 @@ import { useState, useRef, useEffect } from 'react'
 import { LogOut } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { usePeerRoom } from '../../hooks/usePeerRoom'
+import { useMachine, useMachineView } from '../../hooks/useMachine'
+import { telephonePartyMachine } from '../../machines/telephoneParty.js'
+import { telephoneTurnMachine } from '../../machines/telephoneTurn.js'
 import { generateImage } from '../../lib/fal'
 import { addScore } from '../../lib/storage'
 import { pickRandom } from '../../lib/similarity'
@@ -33,6 +36,8 @@ export default function TelephoneParty({ game }) {
   }, [room.setShared])
 
   const s = room.state || LOBBY_STATE
+  // The shared phase is moved by the host's reducer through telephonePartyMachine.
+  const machineAttrs = useMachineView(telephonePartyMachine, s.phase).attrs
   const players = room.players
   const nameOf = (id) => {
     const p = players.find((x) => x.id === id)
@@ -52,21 +57,23 @@ export default function TelephoneParty({ game }) {
 
   if (room.status !== 'open' || s.phase === 'lobby') {
     return (
-      <RoomLobby room={room} title="Telephone party" minPlayers={2} startLabel="Start telephone"
-        onStart={() => room.dispatch({ type: 'start' })}>
-        <div className="brutalist-card p-4">
-          <p className="text-xs font-black text-navy/50 uppercase mb-1">How it works</p>
-          <p className="text-sm text-navy/70 font-medium">
-            Everyone writes a secret starting prompt. Each step, the chains move to the next player, who sees only the latest image and describes it.
-            Up to {MAX_PARTY_STEPS} steps. At the end you see how every chain drifted and vote for the funniest one.
-          </p>
-        </div>
-      </RoomLobby>
+      <div {...machineAttrs}>
+        <RoomLobby room={room} title="Telephone party" minPlayers={2} startLabel="Start telephone"
+          onStart={() => room.dispatch({ type: 'start' })}>
+          <div className="brutalist-card p-4">
+            <p className="text-xs font-black text-navy/50 uppercase mb-1">How it works</p>
+            <p className="text-sm text-navy/70 font-medium">
+              Everyone writes a secret starting prompt. Each step, the chains move to the next player, who sees only the latest image and describes it.
+              Up to {MAX_PARTY_STEPS} steps. At the end you see how every chain drifted and vote for the funniest one.
+            </p>
+          </div>
+        </RoomLobby>
+      </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" {...machineAttrs}>
       <div className="brutalist-card p-3 flex items-center justify-between gap-3">
         <p className="text-xs font-black text-navy uppercase min-w-0 truncate">
           Room {room.code}
@@ -85,6 +92,8 @@ export default function TelephoneParty({ game }) {
   )
 }
 
+// What I see during play is derived from the shared state: watching (joined
+// late), my turn (TurnPanel, with its own local machine), or waiting (played).
 function PlayPhase({ room, s, nameOf }) {
   const n = s.order.length
   const seat = s.order.indexOf(room.myId)
@@ -153,7 +162,7 @@ function PlayPhase({ room, s, nameOf }) {
 
 function TurnPanel({ step, imageUrl, onSubmit }) {
   const [draft, setDraft] = useState('')
-  const [status, setStatus] = useState('edit') // edit, drawing, sent
+  const flow = useMachine(telephoneTurnMachine) // see src/machines/telephoneTurn.js
   const [error, setError] = useState(null)
   const aliveRef = useRef(true)
   useEffect(() => {
@@ -166,27 +175,30 @@ function TurnPanel({ step, imageUrl, onSubmit }) {
   const submit = async (e) => {
     e?.preventDefault()
     const text = draft.trim()
-    if (!text || status !== 'edit') return
-    setStatus('drawing')
+    // Only from edit: a double tap or Enter during drawing is ignored.
+    if (!text || !flow.send('SUBMIT')) return
     setError(null)
     try {
       const url = await generateImage(text)
-      if (!aliveRef.current) return
+      if (!aliveRef.current || !flow.send('DRAWN')) return
       onSubmit(text, url)
-      setStatus('sent')
     } catch {
-      if (!aliveRef.current) return
+      if (!aliveRef.current || !flow.send('DRAW_FAILED')) return
       setError('Could not draw that. Your text is still here, try again.')
-      setStatus('edit')
     }
   }
 
-  if (status === 'drawing') return <GeneratingSpinner color={PINK} label="Drawing your words..." />
-  if (status === 'sent') return <GeneratingSpinner color={PINK} label="Sending..." />
+  if (flow.is('drawing', 'sent')) {
+    return (
+      <div {...flow.attrs}>
+        <GeneratingSpinner color={PINK} label={flow.is('drawing') ? 'Drawing your words...' : 'Sending...'} />
+      </div>
+    )
+  }
 
   const first = step === 0
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3" {...flow.attrs}>
       <ErrorBanner message={error} onRetry={draft.trim() ? submit : undefined} />
       <div className={`grid grid-cols-1 gap-4 ${first ? '' : 'md:grid-cols-2'}`}>
         {!first && (

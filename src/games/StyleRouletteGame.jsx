@@ -3,6 +3,8 @@ import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
 import { useGameRounds } from '../hooks/useGameRounds'
 import { useRoundTimer } from '../hooks/useRoundTimer'
+import { useMachine } from '../hooks/useMachine'
+import { styleRouletteMachine } from '../machines/styleRoulette'
 import { pickRandom, shuffle, preloadImages } from '../lib/similarity'
 import StatsBar from '../components/game/StatsBar'
 import GameOverCard from '../components/game/GameOverCard'
@@ -45,23 +47,23 @@ export default function StyleRouletteGame({ game }) {
   const [options, setOptions] = useState([])
   const [selected, setSelected] = useState(null)
   const [roundPts, setRoundPts] = useState(0)
-  const [phase, setPhase] = useState('idle') // idle, loading, playing, result
+  const flow = useMachine(styleRouletteMachine) // see src/machines/styleRoulette.js
+  const phase = flow.state
   const [error, setError] = useState(null)
   const [usedSubjects, setUsedSubjects] = useState([])
   const [usedStyles, setUsedStyles] = useState([])
 
   const { timeLeft, start: startTimer, stop: stopTimer } = useRoundTimer(() => {
-    // Time ran out without an answer
-    if (phase !== 'playing') return
+    // Time ran out. Ignored unless a round is being played (the player may have just answered).
+    if (!flow.send('TIMEOUT')) return
     setSelected('timeout')
     setStreak(0)
     setRoundPts(0)
     recordScore(0)
-    setPhase('result')
   })
 
   const startRound = async () => {
-    setPhase('loading')
+    if (!flow.send('START')) return
     setError(null)
     setSelected(null)
 
@@ -82,18 +84,19 @@ export default function StyleRouletteGame({ game }) {
       // Preload so the countdown never runs against a blank image
       await preloadImages([url])
       if (isStale(t)) return
+      if (!flow.send('LOADED')) return
       setImageUrl(url)
-      setPhase('playing')
       startTimer(BASE_TIME)
     } catch {
       if (isStale(t)) return
+      if (!flow.send('LOAD_FAILED')) return
       setError('Could not make the image. Try again.')
-      setPhase('idle')
     }
   }
 
   const handleSelect = (style) => {
-    if (selected || phase !== 'playing') return
+    // One answer per round; a tap after the timer ran out is ignored
+    if (!flow.send('ANSWER')) return
     stopTimer()
     setSelected(style.id)
     const isCorrect = style.id === correctStyle.id
@@ -103,7 +106,6 @@ export default function StyleRouletteGame({ game }) {
     setStreak(isCorrect ? streak + 1 : 0)
     setRoundPts(pts)
     recordScore(pts)
-    setPhase('result')
   }
 
   const handleNextRound = () => {
@@ -111,7 +113,7 @@ export default function StyleRouletteGame({ game }) {
     nextRound()
     setImageUrl(null)
     setSelected(null)
-    setPhase('idle')
+    flow.send(round >= MAX_ROUNDS ? 'FINISH' : 'NEXT')
   }
 
   const handleRestart = () => {
@@ -126,12 +128,12 @@ export default function StyleRouletteGame({ game }) {
     setError(null)
     setUsedSubjects([])
     setUsedStyles([])
-    setPhase('idle')
+    flow.send('RESTART')
   }
 
   if (gameOver) {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4" {...flow.attrs}>
         <GameOverCard
           emoji="🎨"
           title="Roulette Complete!"
@@ -154,7 +156,7 @@ export default function StyleRouletteGame({ game }) {
   ]
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" {...flow.attrs}>
       <StatsBar stats={stats} />
 
       <ErrorBanner message={error} />

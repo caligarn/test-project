@@ -3,6 +3,8 @@ import { addScore } from '../lib/storage'
 import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
 import { useSharedGallery } from '../hooks/useSharedGallery'
+import { useMachine } from '../hooks/useMachine'
+import { haikuCanvasMachine } from '../machines/haikuCanvas.js'
 import StatsBar from '../components/game/StatsBar'
 import ErrorBanner from '../components/game/ErrorBanner'
 import GameImage from '../components/game/GameImage'
@@ -101,8 +103,9 @@ export default function HaikuCanvasGame({ game }) {
   const [lines, setLines] = useState(['', '', ''])
   const [style, setStyle] = useState('watercolor')
   const gallery = useSharedGallery('haiku-canvas')
-  const [sort, setSort] = useState('new')
-  const [generating, setGenerating] = useState(false)
+  const [sort, setSort] = useState('new') // view only, not part of the flow
+  const flow = useMachine(haikuCanvasMachine) // see src/machines/haikuCanvas.js
+  const generating = flow.is('painting', 'sharing')
   const [error, setError] = useState(null)
   const [mineCount, setMineCount] = useState(0)
   const [latest, setLatest] = useState(null)
@@ -131,8 +134,9 @@ export default function HaikuCanvasGame({ game }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!allFilled || generating) return
-    setGenerating(true)
+    if (!allFilled) return
+    // Only allowed while writing: a second tap during painting is ignored.
+    if (!flow.send('SUBMIT')) return
     setError(null)
     const clean = lines.map(l => l.trim())
     const haiku = clean.join(' / ')
@@ -145,11 +149,12 @@ export default function HaikuCanvasGame({ game }) {
     } catch (err) {
       if (aliveRef.current) {
         setError(errorText(err, 'Image generation failed. Please try again.'))
-        setGenerating(false)
+        flow.send('PAINT_FAILED')
       }
       return
     }
-    if (!aliveRef.current) return
+    if (!aliveRef.current || !flow.send('PAINTED')) return
+    let shared = true
     try {
       const item = await gallery.add({ imageUrl: url, text: clean.join('\n'), meta: { lines: clean, style } })
       if (!aliveRef.current) return
@@ -159,11 +164,12 @@ export default function HaikuCanvasGame({ game }) {
       // The art was made, so the haiku still counts; it just is not shared.
       setLatest({ id: 'local', imageUrl: url, text: clean.join('\n'), meta: { lines: clean }, username: user?.username || null, votes: 0, local: true })
       setError(errorText(err, 'Could not add your haiku to the shared gallery.'))
+      shared = false
     }
     session.award(pts)
     setMineCount(c => c + 1)
     setLines(['', '', ''])
-    setGenerating(false)
+    flow.send(shared ? 'SHARED' : 'SHARE_FAILED')
   }
 
   const handleVote = async (id) => {
@@ -175,7 +181,7 @@ export default function HaikuCanvasGame({ game }) {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6" {...flow.attrs}>
       <div>
         <StatsBar
           className="mb-2!"

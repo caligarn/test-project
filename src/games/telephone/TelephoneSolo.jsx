@@ -3,6 +3,8 @@ import { useAuth } from '../../context/AuthContext'
 import { generateImage, judge } from '../../lib/fal'
 import { promptSimilarityDetail, pickRandom } from '../../lib/similarity'
 import { useGameRounds } from '../../hooks/useGameRounds'
+import { useMachine } from '../../hooks/useMachine'
+import { telephoneSoloMachine } from '../../machines/telephoneSolo.js'
 import StatsBar from '../../components/game/StatsBar'
 import ErrorBanner from '../../components/game/ErrorBanner'
 import GeneratingSpinner from '../../components/game/GeneratingSpinner'
@@ -18,7 +20,8 @@ export default function TelephoneSolo({ game }) {
   const username = user?.username || 'guest'
   const g = useGameRounds({ gameId: game.id, username, maxRounds: SOLO_STEPS })
 
-  const [phase, setPhase] = useState('idle') // idle, loading, describe, judging, over
+  const flow = useMachine(telephoneSoloMachine) // see src/machines/telephoneSolo.js
+  const phase = flow.state
   const [secret, setSecret] = useState('')
   const [images, setImages] = useState([]) // images[0] is drawn from the secret prompt
   const [descriptions, setDescriptions] = useState([])
@@ -27,6 +30,8 @@ export default function TelephoneSolo({ game }) {
   const [result, setResult] = useState(null)
 
   const start = async () => {
+    // Only from idle: a second tap while the secret is drawn is ignored.
+    if (!flow.send('START')) return
     g.restart()
     const t = g.token()
     const prompt = pickRandom(STARTING_PROMPTS, secret ? [secret] : [])
@@ -36,51 +41,51 @@ export default function TelephoneSolo({ game }) {
     setDraft('')
     setResult(null)
     setError(null)
-    setPhase('loading')
     try {
       const url = await generateImage(prompt)
-      if (g.isStale(t)) return
+      if (g.isStale(t) || !flow.send('DRAWN')) return
       setImages([url])
-      setPhase('describe')
     } catch {
-      if (g.isStale(t)) return
+      if (g.isStale(t) || !flow.send('START_FAILED')) return
       setError('Could not draw the secret prompt. Try again.')
-      setPhase('idle')
     }
+  }
+
+  const playAgain = () => {
+    flow.send('RESTART')
+    start()
   }
 
   const submit = async (e) => {
     e?.preventDefault()
     const text = draft.trim()
-    if (!text || phase !== 'describe') return
+    // The machine accepts SUBMIT only while describing: a double tap is ignored.
+    if (!text || !flow.send('SUBMIT')) return
     const step = descriptions.length + 1
+    const last = step >= SOLO_STEPS
     const t = g.token()
     setError(null)
-    setPhase('loading')
     let url
     try {
       url = await generateImage(text)
     } catch {
-      if (g.isStale(t)) return
+      if (g.isStale(t) || !flow.send('DRAW_FAILED')) return
       setError('Could not draw your description. It is still in the box, try again.')
-      setPhase('describe')
       return
     }
-    if (g.isStale(t)) return
+    if (g.isStale(t) || !flow.send(last ? 'DRAWN_LAST' : 'DRAWN')) return
     const nextImages = [...images, url]
     const nextDescriptions = [...descriptions, text]
     setImages(nextImages)
     setDescriptions(nextDescriptions)
     setDraft('')
 
-    if (step < SOLO_STEPS) {
+    if (!last) {
       g.nextRound()
-      setPhase('describe')
       return
     }
 
-    // Last step: judge how much of the first image survived.
-    setPhase('judging')
+    // Last step (now judging): how much of the first image survived?
     const verdict = await judge('drift', { targetUrl: nextImages[0], imageUrl: url })
     if (g.isStale(t)) return
     const words = promptSimilarityDetail(text, secret)
@@ -94,7 +99,7 @@ export default function TelephoneSolo({ game }) {
     })
     g.recordScore(score.total)
     g.nextRound() // last round: saves the total once
-    setPhase('over')
+    flow.send('JUDGED')
   }
 
   const latest = images[images.length - 1]
@@ -106,9 +111,9 @@ export default function TelephoneSolo({ game }) {
       ...descriptions.map((d, i) => ({ label: `Your description ${i + 1}`, text: d, imageUrl: images[i + 1] })),
     ]
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4" {...flow.attrs}>
         <GameOverCard emoji="📞" title="Chain complete!" score={`${result.total} pts`}
-          subtitle="Here is how the message drifted." onRestart={start} restartLabel="Play again">
+          subtitle="Here is how the message drifted." onRestart={playAgain} restartLabel="Play again">
           <div className="flex flex-col gap-3 text-left mb-2">
             {result.judged ? (
               <div className="p-3 border-2 border-navy bg-highlight/30">
@@ -146,7 +151,7 @@ export default function TelephoneSolo({ game }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" {...flow.attrs}>
       <StatsBar stats={[
         { label: 'Step', value: `${phase === 'idle' ? 0 : step}/${SOLO_STEPS}` },
         { label: 'Images', value: images.length },

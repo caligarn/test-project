@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 import { getLeaderboard } from '../lib/storage'
+import { useMachine } from '../hooks/useMachine'
+import { dailyMachine } from '../machines/daily.js'
 import ErrorBanner from '../components/game/ErrorBanner'
 import GeneratingSpinner from '../components/game/GeneratingSpinner'
 import GameImage from '../components/game/GameImage'
@@ -67,43 +69,50 @@ const firstUnplayed = (rounds, played) => {
 }
 
 export default function DailyChallengeGame() {
+  const { user } = useAuth()
+  // Progress is kept per account: logging in or out starts over with a fresh
+  // flow (and a fresh load) for that player.
+  return <DailyBoard key={user ? `user:${user.username}` : 'guest'} />
+}
+
+function DailyBoard() {
   const { user, loading: authLoading } = useAuth()
+  const flow = useMachine(dailyMachine) // see src/machines/daily.js
+  const { send } = flow
   const [data, setData] = useState(null) // { date, rounds, played }
-  const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
-  const [viewing, setViewing] = useState(null) // round index, or 'summary'
+  const [viewing, setViewing] = useState(null) // round index shown in guessing / result
   const [guess, setGuess] = useState('')
-  const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
   const [board, setBoard] = useState(null)
   const [boardError, setBoardError] = useState(null)
   const [shareState, setShareState] = useState(null) // 'copied' | 'manual'
   const loadId = useRef(0)
 
-  const load = useCallback(async () => {
+  // Starts in 'loading'; Retry moves back there before calling this again.
+  // (Promise callbacks rather than await: the effect lint rule cannot see past await.)
+  const load = useCallback(() => {
     const id = ++loadId.current
-    setLoading(true)
-    setLoadError(null)
-    try {
-      const d = await api('/daily')
-      if (id !== loadId.current) return
-      const played = d.played || {}
-      setData({ ...d, played })
-      const next = firstUnplayed(d.rounds, played)
-      setViewing(next == null ? 'summary' : next)
-    } catch (err) {
-      if (id !== loadId.current) return
-      setLoadError(err?.message || 'Could not load today\'s challenge.')
-    } finally {
-      if (id === loadId.current) setLoading(false)
-    }
-  }, [])
+    return api('/daily').then(
+      (d) => {
+        if (id !== loadId.current) return
+        const played = d.played || {}
+        setData({ ...d, played })
+        const next = firstUnplayed(d.rounds, played)
+        setViewing(next)
+        send(next == null ? 'LOADED_DONE' : 'LOADED')
+      },
+      (err) => {
+        if (id !== loadId.current) return
+        setLoadError(err?.message || 'Could not load today\'s challenge.')
+        send('LOAD_FAILED')
+      }
+    )
+  }, [send])
 
-  // Reload when the player logs in or out (progress is kept per account).
-  const username = user?.username || null
   useEffect(() => {
     load()
-  }, [load, username])
+  }, [load])
   useEffect(() => () => {
     loadId.current++
   }, [])
@@ -114,42 +123,58 @@ export default function DailyChallengeGame() {
   const done = data && playedCount >= ROUNDS
   const total = Object.values(played).reduce((sum, r) => sum + (r?.score || 0), 0)
 
-  const loadBoard = useCallback(async () => {
-    setBoardError(null)
-    try {
-      setBoard(await getLeaderboard('daily', 10))
-    } catch {
-      setBoardError('Could not load the leaderboard.')
-    }
-  }, [])
+  const retryLoad = () => {
+    if (!flow.send('RETRY')) return
+    setLoadError(null)
+    load()
+  }
 
+  const loadBoard = useCallback(() => getLeaderboard('daily', 10).then(
+    (rows) => {
+      setBoard(rows)
+      setBoardError(null)
+    },
+    () => setBoardError('Could not load the leaderboard.')
+  ), [])
+
+  const inSummary = flow.is('summary')
   useEffect(() => {
-    if (viewing === 'summary' && done) loadBoard()
-  }, [viewing, done, loadBoard])
+    if (inSummary) loadBoard()
+  }, [inSummary, loadBoard])
 
   const submitGuess = async (e) => {
     e.preventDefault()
     const text = guess.trim()
-    if (!text || submitting || typeof viewing !== 'number' || played[viewing]) return
-    setSubmitting(true)
+    if (!text || typeof viewing !== 'number' || played[viewing]) return
+    // One guess at a time, and only while an unplayed image is shown.
+    if (!flow.send('SUBMIT')) return
     setError(null)
     const index = viewing
     try {
       const res = await api('/daily/guess', { method: 'POST', body: { index, guess: text } })
+      // A reload (login change) while checking drops this result; the reload has it.
+      if (!flow.send('GUESSED')) return
       const entry = { score: res.score, prompt: res.prompt, matchedWords: res.matchedWords || [], guess: res.guess }
       setData((prev) => (prev ? { ...prev, played: { ...prev.played, [index]: entry } } : prev))
       setGuess('')
     } catch (err) {
+      if (!flow.send('GUESS_FAILED')) return
       setError(err?.message || 'Could not send your guess. Try again.')
-    } finally {
-      setSubmitting(false)
     }
   }
 
   const goNext = () => {
     const next = firstUnplayed(rounds, played)
-    setViewing(next == null ? 'summary' : next)
+    if (!flow.send(next == null ? 'SEE_SUMMARY' : 'NEXT')) return
+    if (next != null) setViewing(next)
     setGuess('')
+    setError(null)
+  }
+
+  /** Strip tap: show that image (its result if played). Ignored while a guess is checked. */
+  const view = (index) => {
+    if (!flow.send(played[index] ? 'VIEW_PLAYED' : 'VIEW')) return
+    setViewing(index)
     setError(null)
   }
 
@@ -159,26 +184,30 @@ export default function DailyChallengeGame() {
     setShareState(ok ? 'copied' : 'manual')
   }
 
-  if (loading && !data) {
+  if (flow.is('loading')) {
     return (
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2" {...flow.attrs}>
         <GeneratingSpinner label="Getting today's images..." color="#1A1A2E" />
         <p className="text-navy/50 text-xs font-medium text-center">The first visit each day can take a few seconds.</p>
       </div>
     )
   }
 
-  if (loadError && !data) {
-    return <ErrorBanner message={loadError} onRetry={load} />
+  if (flow.is('loadFailed') || !data) {
+    return (
+      <div {...flow.attrs}>
+        <ErrorBanner message={loadError || 'Could not load today\'s challenge.'} onRetry={retryLoad} />
+      </div>
+    )
   }
 
-  if (!data) return null
-
-  const current = typeof viewing === 'number' ? rounds.find((r) => r.index === viewing) : null
+  const submitting = flow.is('checking')
+  const showGuess = flow.is('guessing', 'checking')
+  const current = showGuess || flow.is('result') ? rounds.find((r) => r.index === viewing) : null
   const currentResult = current ? played[current.index] : null
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" {...flow.attrs}>
       {/* Header: date, progress, running total */}
       <div className="grid grid-cols-3 gap-3">
         <div className="brutalist-card p-3 sm:p-4 text-center">
@@ -205,11 +234,11 @@ export default function DailyChallengeGame() {
       <div className="grid grid-cols-5 gap-2">
         {rounds.map((r) => {
           const res = played[r.index]
-          const active = viewing === r.index
+          const active = !inSummary && viewing === r.index
           return (
             <button
               key={r.index}
-              onClick={() => { setViewing(r.index); setError(null) }}
+              onClick={() => view(r.index)}
               aria-label={res ? `Image ${r.index + 1}, scored ${res.score}` : `Image ${r.index + 1}, not played yet`}
               className="relative aspect-square overflow-hidden bg-white"
               style={{ border: `3px solid ${active ? '#FF2D55' : '#1A1A2E'}` }}
@@ -225,8 +254,8 @@ export default function DailyChallengeGame() {
           )
         })}
       </div>
-      {done && viewing !== 'summary' && (
-        <button onClick={() => setViewing('summary')}
+      {done && !inSummary && (
+        <button onClick={() => flow.send('SEE_SUMMARY')}
           className="self-center px-4 py-2 text-navy text-xs font-black uppercase"
           style={{ border: '2px solid #1A1A2E' }}>
           Back to summary
@@ -234,7 +263,7 @@ export default function DailyChallengeGame() {
       )}
 
       {/* Guess an image */}
-      {current && !currentResult && (
+      {current && showGuess && !currentResult && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
             <GameImage src={current.imageUrl} alt={`Daily image ${current.index + 1}`} className="w-full aspect-square object-cover" eager />
@@ -265,7 +294,7 @@ export default function DailyChallengeGame() {
       )}
 
       {/* Result for one image */}
-      {current && currentResult && (
+      {current && flow.is('result') && currentResult && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div style={{ border: `3px solid ${band(currentResult.score).color}`, overflow: 'hidden' }}>
             <GameImage src={current.imageUrl} alt={`Daily image ${current.index + 1}`} className="w-full aspect-square object-cover" eager />
@@ -296,7 +325,7 @@ export default function DailyChallengeGame() {
                 Next Image →
               </button>
             ) : (
-              <button onClick={() => setViewing('summary')}
+              <button onClick={() => flow.send('SEE_SUMMARY')}
                 className="w-full py-3 bg-navy text-white font-black uppercase text-sm"
                 style={{ border: '2px solid #1A1A2E' }}>
                 See Today's Result
@@ -307,7 +336,7 @@ export default function DailyChallengeGame() {
       )}
 
       {/* Final summary */}
-      {viewing === 'summary' && done && (
+      {inSummary && done && (
         <div className="flex flex-col gap-4">
           <div className="brutalist-card p-6 sm:p-8 text-center">
             <span className="text-5xl block mb-3">📅</span>
@@ -358,7 +387,7 @@ export default function DailyChallengeGame() {
                 <Link to="/login" className="font-black text-primary uppercase">Log in</Link> to appear on it next time.
               </p>
             )}
-            {boardError && <ErrorBanner message={boardError} onRetry={loadBoard} />}
+            {boardError && <ErrorBanner message={boardError} onRetry={() => { setBoardError(null); loadBoard() }} />}
             {!board && !boardError && <p className="text-navy/50 text-sm font-medium">Loading...</p>}
             {board && board.length === 0 && (
               <p className="text-navy/50 text-sm font-medium">No scores yet today. Be the first!</p>

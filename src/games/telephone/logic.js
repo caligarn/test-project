@@ -1,5 +1,7 @@
 // Pure game logic for Telephone (solo scoring and the party-mode reducer).
 // No React and no browser APIs here, so it can be unit tested in Node.
+// The party phase moves only through telephonePartyMachine (src/machines/telephoneParty.js).
+import { telephonePartyMachine } from '../../machines/telephoneParty.js'
 
 export const STARTING_PROMPTS = [
   'A dragon sleeping on a pile of gold coins in a cave',
@@ -72,7 +74,12 @@ export function revealableChains(state) {
   return (state.chains || []).map((c, i) => (latestImage(c) ? i : -1)).filter((i) => i >= 0)
 }
 
-export const LOBBY_STATE = { phase: 'lobby', gameNo: 0 }
+export const LOBBY_STATE = { phase: telephonePartyMachine.initial, gameNo: 0 }
+
+/** Next party phase for `event`, or the same phase when the machine does not allow it. */
+function nextPhase(phase, event) {
+  return telephonePartyMachine.transition(phase, event) ?? phase
+}
 
 function connectedIds(players) {
   return new Set((players || []).filter((p) => p.connected).map((p) => p.id))
@@ -114,7 +121,7 @@ function advance(s, connected) {
     const complete = s.chains.every((c) => c.entries.length > s.step)
     if (!complete) return s
     if (s.step + 1 >= s.steps) {
-      s.phase = 'reveal'
+      s.phase = nextPhase(s.phase, 'ALL_PLAYED')
       s.revealPos = 0
       return s
     }
@@ -140,11 +147,11 @@ export function reduceParty(state, action, fromId, players) {
   const type = action?.type
 
   if (type === 'start') {
-    if (!isHost || (state.phase !== 'lobby' && state.phase !== 'done')) return state
+    if (!isHost || !telephonePartyMachine.can(state.phase, 'START')) return state
     const order = (players || []).filter((p) => p.connected).map((p) => p.id)
     if (order.length < 2) return state
     const s = {
-      phase: 'play',
+      phase: nextPhase(state.phase, 'START'),
       gameNo: (state.gameNo || 0) + 1,
       order,
       steps: Math.min(order.length, MAX_PARTY_STEPS),
@@ -158,7 +165,7 @@ export function reduceParty(state, action, fromId, players) {
 
   if (type === 'newGame') {
     if (!isHost) return state
-    return { phase: 'lobby', gameNo: state.gameNo || 0 }
+    return { phase: nextPhase(state.phase, 'NEW_GAME'), gameNo: state.gameNo || 0 }
   }
 
   if (state.phase === 'play') {
@@ -195,7 +202,7 @@ export function reduceParty(state, action, fromId, players) {
       return { ...state, revealPos: clamp(Number(action.pos) || 0, 0, Math.max(0, max)) }
     }
     if (type === 'startVote' && isHost) {
-      return { ...state, phase: 'vote', votes: {} }
+      return { ...state, phase: nextPhase(state.phase, 'START_VOTE'), votes: {} }
     }
     return state
   }
@@ -207,12 +214,12 @@ export function reduceParty(state, action, fromId, players) {
       if (!revealableChains(state).includes(chain)) return state
       if (state.chains[chain].starter === fromId) return state
       const s = { ...state, votes: { ...state.votes, [fromId]: chain } }
-      if (allVoted(s, connected)) s.phase = 'done'
+      if (allVoted(s, connected)) s.phase = nextPhase(s.phase, 'ALL_VOTED')
       return s
     }
-    if (type === 'finish' && isHost) return { ...state, phase: 'done' }
+    if (type === 'finish' && isHost) return { ...state, phase: nextPhase(state.phase, 'FINISH') }
     if (type === '$leave') {
-      if (allVoted(state, connected)) return { ...state, phase: 'done' }
+      if (allVoted(state, connected)) return { ...state, phase: nextPhase(state.phase, 'ALL_VOTED') }
     }
     return state
   }

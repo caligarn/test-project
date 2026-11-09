@@ -1,14 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { LogOut } from 'lucide-react'
 import { usePeerRoom } from '../../hooks/usePeerRoom'
+import { useMachineView } from '../../hooks/useMachine'
 import RoomLobby from '../../components/game/RoomLobby'
 import { addScore } from '../../lib/storage'
 import { gameLimits } from '../../lib/gameLimits'
 import { useAuth } from '../../context/AuthContext'
-import {
-  POINTS_PER_VOTE, MAX_JUDGE_BONUS, freshSecret, initialPartyState, cleanEntry, startGame, startSubmit,
-  toVote, toResults, nextRound, maybeAdvance, standings,
-} from './partyLogic'
+import { POINTS_PER_VOTE, MAX_JUDGE_BONUS, freshSecret, initialPartyState, applyPartyAction, partyMachine, standings } from './partyLogic'
 
 const MEDALS = ['🥇', '🥈', '🥉']
 
@@ -61,70 +59,15 @@ export default function SubmitVoteParty({
   const secretRef = useRef(freshSecret())
   const roomRef = useRef(null)
 
+  // Host only: the pure reducer in partyLogic.js decides; the phase moves
+  // through partyMachine (src/machines/submitVoteParty.js).
   const onAction = useCallback(
     (action, fromId, { players, state }) => {
       const room = roomRef.current
-      if (!room || !action) return
-      const hostId = players.find((p) => p.host)?.id
-      const fromHost = fromId === hostId
-      const secret = secretRef.current
-      const now = Date.now()
-      const advance = (next) => maybeAdvance(next, secretRef.current, players, { voteSeconds, now })
-
-      switch (action.type) {
-        case 'start':
-        case 'again':
-          if (!fromHost || (state.phase !== 'lobby' && state.phase !== 'final')) return
-          secretRef.current = freshSecret()
-          room.setShared(startGame(state, players))
-          return
-        case 'pick':
-          if (!fromHost || state.phase !== 'pick' || !action.challenge) return
-          secretRef.current = freshSecret()
-          room.setShared(startSubmit(state, action.challenge, submitSeconds, now))
-          return
-        case 'submit': {
-          if (state.phase !== 'submit' || action.round !== state.round || state.submitted.includes(fromId)) return
-          const entry = cleanEntry(action.entry)
-          if (!entry || Object.values(secret.entries).some((e) => e.id === entry.id)) return
-          secret.entries[fromId] = entry
-          room.setShared(advance({
-            ...state,
-            submitted: [...state.submitted, fromId],
-            scores: fromId in state.scores ? state.scores : { ...state.scores, [fromId]: 0 },
-          }))
-          return
-        }
-        case 'vote': {
-          if (state.phase !== 'vote' || action.round !== state.round || state.voted.includes(fromId)) return
-          const target = state.entries.find((e) => e.id === action.entryId)
-          if (!target || secret.entries[fromId]?.id === target.id) return
-          secret.votes[fromId] = target.id
-          room.setShared(advance({ ...state, voted: [...state.voted, fromId] }))
-          return
-        }
-        case 'advance':
-          if (!fromHost) return
-          if (state.phase === 'submit') room.setShared(advance(toVote(state, secret, voteSeconds, now)))
-          else if (state.phase === 'vote') room.setShared(toResults(state, secret))
-          else if (state.phase === 'results') room.setShared(nextRound(state))
-          return
-        case '$timeout':
-          if (!fromHost || action.phase !== state.phase || action.round !== state.round) return
-          if (state.phase === 'submit') room.setShared(advance(toVote(state, secret, voteSeconds, now)))
-          else if (state.phase === 'vote') room.setShared(toResults(state, secret))
-          return
-        case '$join':
-          if (state.phase !== 'lobby' && !(action.playerId in state.scores)) {
-            room.setShared({ ...state, scores: { ...state.scores, [action.playerId]: 0 } })
-          }
-          return
-        case '$leave':
-          // Do not wait for players who left: move on if everyone left has acted.
-          room.setShared(advance(state))
-          return
-        default:
-      }
+      if (!room) return
+      const next = applyPartyAction(state, secretRef.current, action, { fromId, players, now: Date.now(), submitSeconds, voteSeconds })
+      secretRef.current = next.secret
+      if (next.state !== state) room.setShared(next.state)
     },
     [submitSeconds, voteSeconds]
   )
@@ -173,11 +116,17 @@ export default function SubmitVoteParty({
     dispatch({ type: 'vote', round: s.round, entryId })
   }
 
-  if (room.status !== 'open' || s.phase === 'lobby') {
+  // Every device shows the host's phase. Outside an open room it is the lobby.
+  const inLobby = room.status !== 'open' || s.phase === 'lobby'
+  const partyAttrs = useMachineView(partyMachine, inLobby ? partyMachine.initial : s.phase).attrs
+
+  if (inLobby) {
     return (
-      <RoomLobby room={room} title={title} minPlayers={2} startLabel={`Start ${rounds} rounds`} onStart={() => dispatch({ type: 'start' })}>
-        {intro && <div className="brutalist-card p-4 text-sm text-navy/70 font-medium">{intro}</div>}
-      </RoomLobby>
+      <div {...partyAttrs}>
+        <RoomLobby room={room} title={title} minPlayers={2} startLabel={`Start ${rounds} rounds`} onStart={() => dispatch({ type: 'start' })}>
+          {intro && <div className="brutalist-card p-4 text-sm text-navy/70 font-medium">{intro}</div>}
+        </RoomLobby>
+      </div>
     )
   }
 
@@ -186,6 +135,11 @@ export default function SubmitVoteParty({
   const myEntryId = mine[key]
   const iSubmitted = s.submitted.includes(room.myId)
   const iVoted = s.voted.includes(room.myId) || !!myVotes[key]
+  // My own step inside the shared phase. Derived, not a machine: it is the
+  // host's lists plus what this device already sent this round.
+  const myStep = s.phase === 'submit' ? (iSubmitted || myEntryId ? 'submitted' : 'composing')
+    : s.phase === 'vote' ? (iVoted ? 'voted' : 'voting')
+      : undefined
   const board = standings(s.scores, room.players)
   const roundLabel = s.phase === 'final' ? 'Final' : `Round ${s.round}/${s.rounds}`
 
@@ -196,7 +150,7 @@ export default function SubmitVoteParty({
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" {...partyAttrs} data-step={myStep}>
       {/* Room bar */}
       <div className="brutalist-card p-3 flex flex-wrap items-center gap-x-4 gap-y-2">
         <span className="text-xs font-black text-navy/50 uppercase">Room <span className="text-navy tracking-widest">{room.code}</span></span>
@@ -228,7 +182,7 @@ export default function SubmitVoteParty({
       {s.phase === 'submit' && (
         <>
           {renderChallenge(s.challenge, { compact: false })}
-          {iSubmitted || myEntryId ? (
+          {myStep === 'submitted' ? (
             <div className="brutalist-card p-6 text-center">
               <p className="text-3xl mb-2">✅</p>
               <p className="font-black text-navy uppercase text-sm">Submitted!</p>

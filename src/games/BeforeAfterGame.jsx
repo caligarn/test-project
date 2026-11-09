@@ -3,6 +3,8 @@ import { addScore } from '../lib/storage'
 import { useAuth } from '../context/AuthContext'
 import { generateImage, editImage, judge } from '../lib/fal'
 import { useSharedGallery } from '../hooks/useSharedGallery'
+import { useMachine } from '../hooks/useMachine'
+import { beforeAfterMachine } from '../machines/beforeAfter'
 import ErrorBanner from '../components/game/ErrorBanner'
 import GeneratingSpinner from '../components/game/GeneratingSpinner'
 import GameImage from '../components/game/GameImage'
@@ -50,7 +52,8 @@ export default function BeforeAfterGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
   const gallery = useSharedGallery('before-after')
-  const [phase, setPhase] = useState('idle') // idle, generating-before, pick, generating-after, judging, result
+  const flow = useMachine(beforeAfterMachine) // see src/machines/beforeAfter.js
+  const phase = flow.state
   const [scene, setScene] = useState(null)
   const [beforeUrl, setBeforeUrl] = useState(null)
   const [afterUrl, setAfterUrl] = useState(null)
@@ -73,53 +76,51 @@ export default function BeforeAfterGame({ game }) {
   const startRound = async () => {
     const choices = SCENES.filter((s) => s.scene !== scene?.scene)
     const s = choices[Math.floor(Math.random() * choices.length)]
+    const now = Date.now()
+    const shared = gallery.items.filter((i) => i.meta?.scene === s.scene && i.beforeUrl && now - i.createdAt < REUSE_MAX_AGE)
+    const reuse = beforeCache.current[s.scene] || shared[Math.floor(Math.random() * shared.length)]?.beforeUrl
+    // A reused "before" goes straight to picking; otherwise the AI paints one.
+    if (!flow.send(reuse ? 'REUSE_SCENE' : 'NEW_SCENE')) return
+
     setScene(s)
-    setBeforeUrl(null)
+    setBeforeUrl(reuse || null)
     setAfterUrl(null)
     setResult(null)
     setTransformation('')
     setCustomTransformation('')
     setError(null)
+    if (reuse) return
 
-    const now = Date.now()
-    const shared = gallery.items.filter((i) => i.meta?.scene === s.scene && i.beforeUrl && now - i.createdAt < REUSE_MAX_AGE)
-    const reuse = beforeCache.current[s.scene] || shared[Math.floor(Math.random() * shared.length)]?.beforeUrl
-    if (reuse) {
-      setBeforeUrl(reuse)
-      setPhase('pick')
-      return
-    }
-
-    setPhase('generating-before')
     try {
       const url = await generateImage(s.prompt, { width: 768, height: 768 })
       if (!aliveRef.current) return
+      if (!flow.send('SCENE_READY')) return
       beforeCache.current[s.scene] = url
       setBeforeUrl(url)
-      setPhase('pick')
     } catch (err) {
       if (!aliveRef.current) return
+      if (!flow.send('SCENE_FAILED')) return
       setError(errorText(err, 'Could not paint the "before" scene. Please try again.'))
-      setPhase('idle')
     }
   }
 
   const sameSceneAgain = () => {
+    if (!flow.send('SAME_SCENE')) return
     setAfterUrl(null)
     setResult(null)
     setTransformation('')
     setCustomTransformation('')
     setError(null)
-    setPhase('pick')
   }
 
   const applyTransformation = async (t) => {
     const label = (t || customTransformation.trim()).slice(0, CUSTOM_MAX)
     if (!label || !beforeUrl) return
+    // One transformation at a time: a second tap while editing is ignored.
+    if (!flow.send('APPLY')) return
     const clean = cleanLabel(label)
     setTransformation(label)
     setError(null)
-    setPhase('generating-after')
 
     let url
     try {
@@ -127,25 +128,25 @@ export default function BeforeAfterGame({ game }) {
       url = await editImage(`Transform this scene: ${clean}. Keep the same place, layout and camera angle.`, beforeUrl)
     } catch (err) {
       if (!aliveRef.current) return
+      if (!flow.send('EDIT_FAILED')) return
       // A reused "before" may have expired: forget it so the next scene is fresh.
       delete beforeCache.current[scene.scene]
       setError(errorText(err, 'The transformation failed. Please try again.'))
-      setPhase('pick')
       return
     }
     if (!aliveRef.current) return
+    if (!flow.send('EDITED')) return
     setAfterUrl(url)
-    setPhase('judging')
 
     const verdict = await judge('edit', { beforeUrl, imageUrl: url, text: clean })
     if (!aliveRef.current) return
+    if (!flow.send('JUDGED')) return
     const judged = verdict.score !== null && verdict.score !== undefined
     const points = judged ? Math.max(0, Math.min(100, Math.round(verdict.score))) : FALLBACK_POINTS
     setResult({ points, score: judged ? points : null, comment: judged ? verdict.comment : '' })
     setScore((s) => s + points)
     setMine((m) => m + 1)
     addScore(game.id, username, points, { scene: scene.scene, transformation: label })
-    setPhase('result')
 
     try {
       await gallery.add({ imageUrl: url, beforeUrl, text: label, meta: { scene: scene.scene, score: judged ? points : null } })
@@ -171,7 +172,7 @@ export default function BeforeAfterGame({ game }) {
   const tabBtn = (active, color) => ({ border: '2px solid #1A1A2E', background: active ? color : 'white', color: active ? 'white' : '#1A1A2E' })
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" {...flow.attrs}>
       {/* Stats */}
       <div className="flex items-center justify-between gap-2 brutalist-card p-3 sm:p-4">
         <div>

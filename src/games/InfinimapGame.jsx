@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
 import { api } from '../lib/api'
 import { withTicket } from '../lib/play'
+import { useMachine } from '../hooks/useMachine'
+import { infinimapMachine } from '../machines/infinimap.js'
 import StatsBar from '../components/game/StatsBar'
 import ErrorBanner from '../components/game/ErrorBanner'
 import GameImage from '../components/game/GameImage'
@@ -166,20 +168,33 @@ export default function InfinimapGame({ game }) {
   const pts = game.pointsPerAction || 50
   const theme = useMemo(todayTheme, [])
 
+  // The player's step (see src/machines/infinimap.js). Everything below is data.
+  const flow = useMachine(infinimapMachine)
   const [tiles, setTiles] = useState({})
-  const [loaded, setLoaded] = useState(false)
+  // Polling errors come and go on their own, independent of the flow.
   const [loadError, setLoadError] = useState(null)
+  // Tiles painting in the background (up to MAX_CONCURRENT at once).
   const [loadingKeys, setLoadingKeys] = useState(() => new Set())
-  const [pending, setPending] = useState(null) // { x, y } of the tile being prompted
+  const [pending, setPending] = useState(null) // { x, y } of the tile being prompted (composing)
   const [prompt, setPrompt] = useState('')
   const [blend, setBlend] = useState(true)
+  // Inspect panel for a painted tile: a view, works in any step.
   const [selected, setSelected] = useState(null) // { x, y } of a painted tile
-  const [orphan, setOrphan] = useState(null) // art whose tile was taken first: { imageUrl, prompt, x, y }
+  // Art whose tile was taken first: { imageUrl, prompt, x, y }. Offered in the
+  // 'taken' step. A ref mirrors it so async code sees the newest one.
+  const [orphan, setOrphanState] = useState(null)
+  const orphanRef = useRef(null)
+  const setOrphan = (o) => {
+    orphanRef.current = o
+    setOrphanState(o)
+  }
+  // One-line messages (toasts). Not part of the flow.
   const [notice, setNotice] = useState(null)
   const [error, setError] = useState(null)
   const [mine, setMine] = useState(0)
   const session = useSessionScore(game.id, username)
 
+  const { send } = flow
   const tilesRef = useRef(tiles)
   useEffect(() => { tilesRef.current = tiles }, [tiles])
   const aliveRef = useRef(true)
@@ -201,9 +216,10 @@ export default function InfinimapGame({ game }) {
       if (aliveRef.current) setLoadError(errorText(err, 'Could not load the map.'))
       return tilesRef.current
     } finally {
-      if (aliveRef.current) setLoaded(true)
+      // Only the first load moves the flow; later polls are ignored here.
+      if (aliveRef.current) send('LOADED')
     }
-  }, [])
+  }, [send])
 
   useEffect(() => {
     refresh()
@@ -240,10 +256,11 @@ export default function InfinimapGame({ game }) {
   const top = camera.y - Math.floor(rows / 2)
   const move = useCallback((dx, dy) => setCamera((c) => ({ x: clampCoord(c.x + dx), y: clampCoord(c.y + dy) })), [])
 
-  // Keyboard navigation (WASD / arrows)
+  // Keyboard navigation (WASD / arrows), off while the prompt dialog is open
+  const composing = flow.is('composing')
   useEffect(() => {
     const handler = (e) => {
-      if (pending) return
+      if (composing) return
       if (e.target instanceof Element && e.target.matches('input, textarea, select, [contenteditable]')) return
       const step = e.shiftKey ? 3 : 1
       const moves = {
@@ -259,7 +276,7 @@ export default function InfinimapGame({ game }) {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [pending, move])
+  }, [composing, move])
 
   // Drag to pan. Pointer capture starts only once the pointer really moves,
   // so a plain tap still reaches the tile button.
@@ -311,11 +328,20 @@ export default function InfinimapGame({ game }) {
       setNotice(`Up to ${MAX_CONCURRENT} tiles can paint at once. Wait for one to finish.`)
       return
     }
+    // Allowed while browsing or while leftover art is offered.
+    if (!flow.send('COMPOSE')) return
     setSelected(null)
     setPending({ x, y })
     setPrompt('')
     setError(null)
     setNotice(null)
+  }
+
+  /** Close the prompt dialog. Leftover art that arrived meanwhile is offered now. */
+  const closeComposer = (event) => {
+    if (!flow.send(event)) return false
+    if (orphanRef.current) flow.send('TAKEN')
+    return true
   }
 
   /** POST the art to a tile. Returns true when placed, false when taken. */
@@ -334,7 +360,8 @@ export default function InfinimapGame({ game }) {
 
   const tileTaken = (x, y, imageUrl, tilePrompt) => {
     setOrphan({ imageUrl, prompt: tilePrompt, x, y })
-    setNotice('Someone painted that tile a moment before you. The map is refreshed. You can still place your art on a free tile nearby.')
+    // Ignored while composing or placing: closeComposer / placeOrphan offer it after.
+    flow.send('TAKEN')
   }
 
   const placed = () => {
@@ -349,6 +376,7 @@ export default function InfinimapGame({ game }) {
     const { x, y } = pending
     const k = key(x, y)
     if (loadingKeys.size >= MAX_CONCURRENT || loadingKeys.has(k)) return
+    if (!closeComposer('PAINT')) return
     const neighbours = neighboursOf(tiles, x, y)
     setPending(null)
     setBusy(k, true)
@@ -376,30 +404,49 @@ export default function InfinimapGame({ game }) {
   }
 
   const placeOrphan = async () => {
-    if (!orphan) return
+    const art = orphanRef.current
+    // PLACE is only allowed in 'taken': a double tap cannot place the art twice.
+    if (!art || !flow.send('PLACE')) return
+    /** Back to browsing; newer leftover art that came in meanwhile is offered next. */
+    const finish = (event) => {
+      if (orphanRef.current === art) setOrphan(null)
+      flow.send(event)
+      if (orphanRef.current) flow.send('TAKEN')
+    }
     const latest = await refresh()
-    const spot = nearestFree(latest, loadingKeys, orphan.x, orphan.y)
+    if (!aliveRef.current) return
+    const spot = nearestFree(latest, loadingKeys, art.x, art.y)
     if (!spot) {
       setNotice('No free tile nearby. Pan somewhere quieter and paint a new tile.')
-      setOrphan(null)
+      finish('NO_SPOT')
       return
     }
     const k = key(spot.x, spot.y)
     setBusy(k, true)
     try {
-      if (await place(spot.x, spot.y, orphan.imageUrl, orphan.prompt)) {
+      if (await place(spot.x, spot.y, art.imageUrl, art.prompt)) {
+        if (!aliveRef.current) return
         placed()
-        setOrphan(null)
         setNotice(`Placed on tile ${spot.x}, ${spot.y}.`)
         setCamera(spot)
+        finish('PLACED')
       } else {
+        if (!aliveRef.current) return
         setNotice('That one was taken too. Try again.')
+        flow.send('PLACE_FAILED')
       }
     } catch (err) {
+      if (!aliveRef.current) return
       setError(errorText(err, 'Could not place your tile.'))
+      flow.send('PLACE_FAILED')
     } finally {
       if (aliveRef.current) setBusy(k, false)
     }
+  }
+
+  const dismissOrphan = () => {
+    if (!flow.send('DISMISS')) return
+    setOrphan(null)
   }
 
   // ---- derived ----------------------------------------------------------------
@@ -414,13 +461,15 @@ export default function InfinimapGame({ game }) {
       .slice(0, 8),
     [tiles]
   )
-  const pendingNeighbours = pending ? neighboursOf(tiles, pending.x, pending.y) : []
+  const showComposer = composing && pending
+  const pendingNeighbours = showComposer ? neighboursOf(tiles, pending.x, pending.y) : []
+  const offering = flow.is('taken', 'placing') && orphan
   const selectedTile = selected ? tiles[key(selected.x, selected.y)] : null
 
   const navBtn = 'w-9 h-9 flex items-center justify-center text-navy font-black text-sm hover:bg-gray-100 transition-colors bg-white'
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" {...flow.attrs}>
       <div>
         <StatsBar
           className="mb-2!"
@@ -447,17 +496,21 @@ export default function InfinimapGame({ game }) {
 
       <ErrorBanner message={error} />
       {loadError && <ErrorBanner message={loadError} onRetry={refresh} />}
+      {offering && (
+        <div className="p-3 bg-white text-navy text-sm font-medium flex flex-wrap items-center justify-between gap-2" style={{ border: '2px solid #1A1A2E' }}>
+          <span>Someone painted that tile a moment before you. The map is refreshed. You can still place your art on a free tile nearby.</span>
+          <span className="flex gap-2">
+            <button onClick={placeOrphan} disabled={!flow.is('taken')} className="px-3 py-1 bg-primary text-white text-xs font-black uppercase disabled:opacity-40" style={{ border: '2px solid #1A1A2E' }}>
+              {flow.is('placing') ? 'Placing...' : 'Place nearby'}
+            </button>
+            <button onClick={dismissOrphan} disabled={!flow.is('taken')} className="px-3 py-1 text-xs font-black uppercase disabled:opacity-40" style={{ border: '2px solid #1A1A2E' }}>OK</button>
+          </span>
+        </div>
+      )}
       {notice && (
         <div className="p-3 bg-white text-navy text-sm font-medium flex flex-wrap items-center justify-between gap-2" style={{ border: '2px solid #1A1A2E' }}>
           <span>{notice}</span>
-          <span className="flex gap-2">
-            {orphan && (
-              <button onClick={placeOrphan} className="px-3 py-1 bg-primary text-white text-xs font-black uppercase" style={{ border: '2px solid #1A1A2E' }}>
-                Place nearby
-              </button>
-            )}
-            <button onClick={() => { setNotice(null); setOrphan(null) }} className="px-3 py-1 text-xs font-black uppercase" style={{ border: '2px solid #1A1A2E' }}>OK</button>
-          </span>
+          <button onClick={() => setNotice(null)} className="px-3 py-1 text-xs font-black uppercase" style={{ border: '2px solid #1A1A2E' }}>OK</button>
         </div>
       )}
 
@@ -507,7 +560,7 @@ export default function InfinimapGame({ game }) {
             )
           })}
         </div>
-        {!loaded && (
+        {flow.is('loading') && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white text-xs font-black uppercase">Loading the map...</div>
         )}
       </div>
@@ -546,8 +599,8 @@ export default function InfinimapGame({ game }) {
       )}
 
       {/* Prompt modal */}
-      {pending && (
-        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-3 sm:p-4" onClick={() => setPending(null)}>
+      {showComposer && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-3 sm:p-4" onClick={() => closeComposer('CANCEL')}>
           <div className="brutalist-card p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-black text-navy uppercase mb-1">Paint tile {pending.x}, {pending.y}</h3>
             {pendingNeighbours.length > 0 ? (
@@ -590,7 +643,7 @@ export default function InfinimapGame({ game }) {
                 )}
               </div>
               <div className="flex gap-2">
-                <button type="button" onClick={() => setPending(null)} className="flex-1 py-2 text-navy text-sm font-black uppercase hover:bg-gray-100" style={{ border: '2px solid #1A1A2E' }}>
+                <button type="button" onClick={() => closeComposer('CANCEL')} className="flex-1 py-2 text-navy text-sm font-black uppercase hover:bg-gray-100" style={{ border: '2px solid #1A1A2E' }}>
                   Cancel
                 </button>
                 <button type="submit" disabled={!prompt.trim()} className="flex-1 py-2 bg-primary text-white text-sm font-black uppercase disabled:opacity-40" style={{ border: '2px solid #1A1A2E' }}>
