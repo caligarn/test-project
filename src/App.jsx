@@ -1,6 +1,8 @@
 import { Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
+import { CreditProvider } from './context/CreditContext'
 import Header from './components/Header'
+import DemoBanner from './components/DemoBanner'
 import BottomNav from './components/BottomNav'
 import Footer from './components/Footer'
 import Home from './pages/Home'
@@ -16,8 +18,10 @@ import VotePage from './pages/VotePage'
 export default function App() {
   return (
     <AuthProvider>
+      <CreditProvider>
       <div className="min-h-screen flex flex-col bg-white">
         <Header />
+        <DemoBanner />
         <main className="flex-1 pb-20 md:pb-4">
           <Routes>
             <Route path="/" element={<Home />} />
@@ -34,6 +38,7 @@ export default function App() {
         <Footer />
         <BottomNav />
       </div>
+      </CreditProvider>
     </AuthProvider>
   )
 }

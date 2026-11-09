@@ -3,6 +3,8 @@ import { useAuth } from '../context/AuthContext'
 import { generateImage } from '../lib/fal'
 import { useGameRounds } from '../hooks/useGameRounds'
 import { useRoundTimer } from '../hooks/useRoundTimer'
+import { useMachine } from '../hooks/useMachine'
+import { styleRouletteMachine } from '../machines/styleRoulette'
 import { pickRandom, shuffle, preloadImages } from '../lib/similarity'
 import StatsBar from '../components/game/StatsBar'
 import GameOverCard from '../components/game/GameOverCard'
@@ -30,7 +32,8 @@ const SUBJECTS = [
   'a medieval castle', 'a bustling cafe', 'a rainy day scene',
 ]
 
-const MAX_ROUNDS = 8
+const MAX_ROUNDS = 5
+// Max per round: 100 + 15s * 2 + streak bonus; at most 700 per game (maxScore 1500).
 const BASE_TIME = 15
 
 export default function StyleRouletteGame({ game }) {
@@ -44,23 +47,23 @@ export default function StyleRouletteGame({ game }) {
   const [options, setOptions] = useState([])
   const [selected, setSelected] = useState(null)
   const [roundPts, setRoundPts] = useState(0)
-  const [phase, setPhase] = useState('idle') // idle, loading, playing, result
+  const flow = useMachine(styleRouletteMachine) // see src/machines/styleRoulette.js
+  const phase = flow.state
   const [error, setError] = useState(null)
   const [usedSubjects, setUsedSubjects] = useState([])
   const [usedStyles, setUsedStyles] = useState([])
 
   const { timeLeft, start: startTimer, stop: stopTimer } = useRoundTimer(() => {
-    // Time ran out without an answer
-    if (phase !== 'playing') return
+    // Time ran out. Ignored unless a round is being played (the player may have just answered).
+    if (!flow.send('TIMEOUT')) return
     setSelected('timeout')
     setStreak(0)
     setRoundPts(0)
     recordScore(0)
-    setPhase('result')
   })
 
   const startRound = async () => {
-    setPhase('loading')
+    if (!flow.send('START')) return
     setError(null)
     setSelected(null)
 
@@ -81,18 +84,19 @@ export default function StyleRouletteGame({ game }) {
       // Preload so the countdown never runs against a blank image
       await preloadImages([url])
       if (isStale(t)) return
+      if (!flow.send('LOADED')) return
       setImageUrl(url)
-      setPhase('playing')
       startTimer(BASE_TIME)
     } catch {
       if (isStale(t)) return
-      setError('Image generation failed.')
-      setPhase('idle')
+      if (!flow.send('LOAD_FAILED')) return
+      setError('Could not make the image. Try again.')
     }
   }
 
   const handleSelect = (style) => {
-    if (selected || phase !== 'playing') return
+    // One answer per round; a tap after the timer ran out is ignored
+    if (!flow.send('ANSWER')) return
     stopTimer()
     setSelected(style.id)
     const isCorrect = style.id === correctStyle.id
@@ -102,7 +106,6 @@ export default function StyleRouletteGame({ game }) {
     setStreak(isCorrect ? streak + 1 : 0)
     setRoundPts(pts)
     recordScore(pts)
-    setPhase('result')
   }
 
   const handleNextRound = () => {
@@ -110,7 +113,7 @@ export default function StyleRouletteGame({ game }) {
     nextRound()
     setImageUrl(null)
     setSelected(null)
-    setPhase('idle')
+    flow.send(round >= MAX_ROUNDS ? 'FINISH' : 'NEXT')
   }
 
   const handleRestart = () => {
@@ -125,12 +128,12 @@ export default function StyleRouletteGame({ game }) {
     setError(null)
     setUsedSubjects([])
     setUsedStyles([])
-    setPhase('idle')
+    flow.send('RESTART')
   }
 
   if (gameOver) {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4" {...flow.attrs}>
         <GameOverCard
           emoji="🎨"
           title="Roulette Complete!"
@@ -153,13 +156,13 @@ export default function StyleRouletteGame({ game }) {
   ]
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" {...flow.attrs}>
       <StatsBar stats={stats} />
 
       <ErrorBanner message={error} />
 
       {phase === 'idle' && (
-        <div className="brutalist-card p-12 text-center">
+        <div className="brutalist-card p-8 sm:p-12 text-center">
           <p className="text-5xl mb-4">🎨</p>
           <h3 className="font-black text-navy uppercase mb-2">Round {round}</h3>
           <p className="text-navy/50 text-sm mb-6 font-medium">Identify the art style of the AI-generated image. You have {BASE_TIME} seconds!</p>

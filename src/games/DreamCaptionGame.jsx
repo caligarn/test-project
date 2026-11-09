@@ -1,12 +1,28 @@
-import { useState, useRef, useEffect } from 'react'
-import { addScore } from '../lib/storage'
+import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { generateImage } from '../lib/fal'
-import { useLocalGallery } from '../hooks/useLocalGallery'
+import { generateImage, judge } from '../lib/fal'
+import { useGameRounds } from '../hooks/useGameRounds'
+import { useMachine } from '../hooks/useMachine'
+import { dreamCaptionMachine } from '../machines/dreamCaption.js'
+import { dreamPickMachine } from '../machines/dreamPick.js'
+import { partyEntryMachine } from '../machines/partyEntry.js'
+import { useSharedGallery } from '../hooks/useSharedGallery'
+import { pickRandom } from '../lib/similarity'
 import StatsBar from '../components/game/StatsBar'
 import ErrorBanner from '../components/game/ErrorBanner'
 import GeneratingSpinner from '../components/game/GeneratingSpinner'
 import GameImage from '../components/game/GameImage'
+import GameOverCard from '../components/game/GameOverCard'
+import ModeToggle from './party/ModeToggle'
+import SubmitVoteParty from './party/SubmitVoteParty'
+import { useAlive } from './party/useAlive'
+
+const COLOR = '#8B5CF6'
+const MAX_ROUNDS = 3
+const POINTS_PER_JUDGE_POINT = 3 // judge 0-100 -> up to 300 per round, 900 per game
+const FALLBACK_POINTS = 50 // judge unavailable: small flat score
+const MAX_CAPTION = 140
+const MY_POSTS_KEY = 'gen_arcade_dream_caption_posts'
 
 const DREAM_PROMPTS = [
   'A staircase made of books leading to a door in the clouds',
@@ -27,202 +43,375 @@ const DREAM_PROMPTS = [
   'A forest of giant mushrooms under a purple sky with two moons',
   'A window floating in space showing a cozy kitchen inside',
   'A city built entirely on the back of a sleeping giant turtle',
+  'A whale swimming through a desert of sand dunes',
+  'A lighthouse whose beam is a river of stars',
 ]
 
-const STORAGE_KEY = 'ai_arcade_dream_captions'
-const VOTES_KEY = 'ai_arcade_votes_dreamcaption'
+const dreamPrompt = (p) => `Surreal dreamlike artwork: ${p}. Ethereal, mystical, impossible, dreamscape.`
 
-function loadVotedIds() {
+function loadMyPosts() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(VOTES_KEY) || '[]')
-    return Array.isArray(parsed) ? parsed : []
+    const list = JSON.parse(sessionStorage.getItem(MY_POSTS_KEY) || '[]')
+    return Array.isArray(list) ? list : []
   } catch {
     return []
   }
 }
-
-function saveVotedIds(ids) {
+function saveMyPosts(ids) {
   try {
-    localStorage.setItem(VOTES_KEY, JSON.stringify(ids))
+    sessionStorage.setItem(MY_POSTS_KEY, JSON.stringify(ids.slice(-100)))
   } catch {
-    // Storage unavailable — votes just won't persist
+    // storage unavailable: own entries just stay votable
   }
 }
 
 export default function DreamCaptionGame({ game }) {
-  const { user } = useAuth()
-  const username = user?.username || 'guest'
-  const { items: gallery, add: addToGallery, update: updateEntry } = useLocalGallery(STORAGE_KEY, { cap: 50, mode: 'prepend' })
-  const [imageUrl, setImageUrl] = useState(null)
-  const [caption, setCaption] = useState('')
-  const [phase, setPhase] = useState('idle') // idle, generating, captioning, submitted
-  const [error, setError] = useState(null)
-  const [score, setScore] = useState(0)
-  const [submitted, setSubmitted] = useState(null)
-  const [votedIds, setVotedIds] = useState(loadVotedIds)
-
-  const aliveRef = useRef(true)
-  useEffect(() => {
-    aliveRef.current = true
-    return () => { aliveRef.current = false }
-  }, [])
-
-  const generateDream = async () => {
-    setPhase('generating')
-    setError(null)
-    setCaption('')
-    const prompt = DREAM_PROMPTS[Math.floor(Math.random() * DREAM_PROMPTS.length)]
-    try {
-      const url = await generateImage(`Surreal dreamlike artwork: ${prompt}. Ethereal, mystical, impossible, dreamscape.`)
-      if (!aliveRef.current) return
-      setImageUrl(url)
-      setPhase('captioning')
-    } catch {
-      if (!aliveRef.current) return
-      setError('Image generation failed.')
-      setPhase('idle')
-    }
-  }
-
-  const handleSubmit = (e) => {
-    e.preventDefault()
-    if (!caption.trim()) return
-
-    // Score based on caption quality (length, creativity indicators)
-    const words = caption.trim().split(/\s+/).length
-    const lengthScore = Math.min(40, words * 4)
-    const punctuationBonus = /[!?…—]/.test(caption) ? 10 : 0
-    const poeticBonus = /\b(whisper|dream|echo|shadow|shimmer|dance|drift|glow|murmur|silence)\b/i.test(caption) ? 15 : 0
-    const pts = lengthScore + punctuationBonus + poeticBonus + 25 // base 25
-
-    const entry = {
-      id: crypto.randomUUID(),
-      imageUrl,
-      caption: caption.trim(),
-      author: username,
-      votes: 0,
-      pts,
-    }
-
-    addToGallery(entry)
-    setSubmitted(entry)
-    setScore(s => s + pts)
-    addScore(game.id, username, pts, { caption: caption.trim() })
-    setPhase('submitted')
-  }
-
-  const handleVote = (entryId) => {
-    const hasVoted = votedIds.includes(entryId)
-    updateEntry(entryId, g => ({ ...g, votes: Math.max(0, (g.votes || 0) + (hasVoted ? -1 : 1)) }))
-    const updatedIds = hasVoted ? votedIds.filter(id => id !== entryId) : [...votedIds, entryId]
-    setVotedIds(updatedIds)
-    saveVotedIds(updatedIds)
-  }
-
-  const newDream = () => {
-    setImageUrl(null)
-    setCaption('')
-    setSubmitted(null)
-    setPhase('idle')
-  }
-
+  const [mode, setMode] = useState(() => (new URLSearchParams(window.location.search).get('room') ? 'party' : 'solo'))
   return (
     <div className="flex flex-col gap-4">
-      {/* Stats */}
-      <StatsBar
-        stats={[
-          { label: 'Your Captions', value: gallery.filter(g => g.author === username).length },
-          { label: 'Gallery', value: gallery.length },
-          { label: 'Score', value: score, color: '#FF2D55' },
-        ]}
-      />
+      <ModeToggle mode={mode} onChange={setMode} color={COLOR} />
+      {mode === 'solo' ? <DreamCaptionSolo game={game} /> : <DreamCaptionParty gameId={game.id} />}
+    </div>
+  )
+}
 
-      <ErrorBanner message={error} />
+// ---------------------------------------------------------------- solo ----
 
-      {phase === 'idle' && (
-        <div className="brutalist-card p-12 text-center">
-          <p className="text-5xl mb-4">💭</p>
-          <h3 className="font-black text-navy uppercase mb-2">Dream Caption</h3>
-          <p className="text-navy/50 text-sm mb-6 font-medium">AI will generate a surreal, dreamlike image. Write the most creative caption you can!</p>
-          <button onClick={generateDream}
-            className="px-8 py-3 bg-[#8B5CF6] text-white font-black uppercase text-sm"
-            style={{ border: '2px solid #1A1A2E' }}>
-            Generate a Dream
-          </button>
-        </div>
-      )}
+function DreamCaptionSolo({ game }) {
+  const { user } = useAuth()
+  const username = user?.username || 'guest'
+  const { round, totalScore, token, isStale, recordScore, nextRound, restart } =
+    useGameRounds({ gameId: game.id, username, maxRounds: MAX_ROUNDS })
+  const gallery = useSharedGallery(game.id)
+  const [myPosts, setMyPosts] = useState(loadMyPosts)
+  const flow = useMachine(dreamCaptionMachine) // see src/machines/dreamCaption.js
+  const phase = flow.state
+  const [imageUrl, setImageUrl] = useState(null)
+  const [caption, setCaption] = useState('')
+  const [error, setError] = useState(null)
+  const [result, setResult] = useState(null) // { pts, score, comment, posted }
+  const [history, setHistory] = useState([]) // [{ imageUrl, caption, pts }]
+  const [usedPrompts, setUsedPrompts] = useState([])
 
-      {phase === 'generating' && (
-        <GeneratingSpinner label="Dreaming up something surreal..." color="#8B5CF6" />
-      )}
+  const generateDream = async () => {
+    if (!flow.send('GENERATE')) return
+    setError(null)
+    setCaption('')
+    setResult(null)
+    const p = pickRandom(DREAM_PROMPTS, usedPrompts)
+    setUsedPrompts((u) => [...u, p])
+    const t = token()
+    try {
+      const url = await generateImage(dreamPrompt(p))
+      if (isStale(t) || !flow.send('DREAMED')) return
+      setImageUrl(url)
+    } catch (err) {
+      if (isStale(t) || !flow.send('DREAM_FAILED')) return
+      setError(err?.message || 'Image generation failed.')
+    }
+  }
 
-      {(phase === 'captioning' || phase === 'submitted') && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
-            <GameImage eager src={imageUrl} alt="Dream" className="w-full object-cover" style={{ maxHeight: 400 }} />
-          </div>
-          <div className="brutalist-card p-6 flex flex-col gap-4">
-            {phase === 'captioning' ? (
-              <>
-                <h3 className="font-black text-navy uppercase text-sm">Caption this dream</h3>
-                <p className="text-navy/40 text-xs font-medium">Be poetic, funny, profound — creativity scores higher!</p>
-                <form onSubmit={handleSubmit} className="flex flex-col gap-3 flex-1">
-                  <textarea
-                    autoFocus
-                    value={caption}
-                    onChange={(e) => setCaption(e.target.value)}
-                    placeholder="Write a creative caption..."
-                    rows={4}
-                    className="w-full px-4 py-3 text-navy text-sm focus:outline-none font-medium resize-none flex-1"
-                    style={{ border: '3px solid #8B5CF6' }}
-                  />
-                  <button type="submit" disabled={!caption.trim()}
-                    className="w-full py-3 bg-[#8B5CF6] text-white text-sm font-black uppercase disabled:opacity-40"
-                    style={{ border: '2px solid #1A1A2E' }}>
-                    Submit Caption
-                  </button>
-                </form>
-              </>
-            ) : (
-              <div className="text-center flex flex-col justify-center flex-1 gap-3">
-                <p className="text-4xl">✨</p>
-                <p className="text-3xl font-black text-primary">+{submitted?.pts || 0} pts</p>
-                <p className="text-sm text-navy italic">"{submitted?.caption}"</p>
-                <button onClick={newDream}
-                  className="mt-4 w-full py-3 bg-[#8B5CF6] text-white font-black uppercase text-sm"
-                  style={{ border: '2px solid #1A1A2E' }}>
-                  Dream Again
-                </button>
+  const submitCaption = async (e) => {
+    e.preventDefault()
+    const text = caption.trim()
+    // Only one submit per image: a second Enter while judging is ignored.
+    if (!text || !flow.send('SUBMIT')) return
+    const t = token()
+    const verdict = await judge('caption', { imageUrl, text })
+    if (isStale(t) || !flow.send('JUDGED')) return
+    const judged = verdict.score != null
+    const pts = judged ? Math.round(verdict.score * POINTS_PER_JUDGE_POINT) : FALLBACK_POINTS
+    recordScore(pts)
+    setHistory((h) => [...h, { imageUrl, caption: text, pts }])
+    setResult({ pts, score: verdict.score, comment: judged ? verdict.comment : '', posted: null })
+    try {
+      const item = await gallery.add({ imageUrl, text, meta: { round } })
+      const ids = [...loadMyPosts(), item.id]
+      saveMyPosts(ids)
+      setMyPosts(ids)
+      if (!isStale(t)) setResult((r) => (r ? { ...r, posted: true } : r))
+    } catch {
+      if (!isStale(t)) setResult((r) => (r ? { ...r, posted: false } : r))
+    }
+  }
+
+  const handleNext = () => {
+    // A double tap must not skip a round: only the first NEXT/FINISH counts.
+    if (!flow.send(round >= MAX_ROUNDS ? 'FINISH' : 'NEXT')) return
+    nextRound()
+    setImageUrl(null)
+    setResult(null)
+  }
+
+  const handleRestart = () => {
+    restart()
+    setImageUrl(null)
+    setCaption('')
+    setResult(null)
+    setHistory([])
+    setError(null)
+    flow.send('RESTART')
+  }
+
+  const isMine = (entry) =>
+    myPosts.includes(entry.id) || (!!user?.username && !!entry.username && entry.username.toLowerCase() === user.username.toLowerCase())
+
+  return (
+    <div className="flex flex-col gap-4" {...flow.attrs}>
+      {phase === 'over' ? (
+        <GameOverCard emoji="💭" title="Dreams captioned!" score={`${totalScore} pts`} subtitle={`${MAX_ROUNDS} rounds completed`} onRestart={handleRestart}>
+          <div className="flex flex-col gap-2 text-left my-4">
+            {history.map((h, i) => (
+              <div key={i} className="flex gap-3 items-center border-2 border-navy p-2 bg-white">
+                <GameImage src={h.imageUrl} alt="" className="w-14 h-14 object-cover flex-none" />
+                <p className="text-xs text-navy italic flex-1 min-w-0 line-clamp-2">"{h.caption}"</p>
+                <span className="text-sm font-black text-primary flex-none">+{h.pts}</span>
               </div>
-            )}
+            ))}
           </div>
-        </div>
+        </GameOverCard>
+      ) : (
+        <>
+          <StatsBar
+            stats={[
+              { label: 'Round', value: `${round}/${MAX_ROUNDS}` },
+              { label: 'Score', value: totalScore, color: '#FF2D55' },
+            ]}
+          />
+
+          <ErrorBanner message={error} />
+
+          {phase === 'idle' && (
+            <div className="brutalist-card p-8 sm:p-12 text-center">
+              <p className="text-5xl mb-4">💭</p>
+              <h3 className="font-black text-navy uppercase mb-2">Round {round}</h3>
+              <p className="text-navy/50 text-sm mb-6 font-medium max-w-md mx-auto">
+                The AI dreams up a surreal image. Write a caption that fits and makes people smile. The AI judge scores it.
+              </p>
+              <button onClick={generateDream} className="btn-brutalist text-white text-sm" style={{ background: COLOR }}>
+                Generate a dream
+              </button>
+            </div>
+          )}
+
+          {phase === 'generating' && <GeneratingSpinner label="Dreaming up something surreal..." color={COLOR} />}
+
+          {(phase === 'captioning' || phase === 'judging' || phase === 'result') && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
+                <GameImage eager src={imageUrl} alt="Dream" className="w-full object-cover" style={{ maxHeight: 400 }} />
+              </div>
+              <div className="brutalist-card p-5 flex flex-col gap-4">
+                {phase === 'captioning' && (
+                  <form onSubmit={submitCaption} className="flex flex-col gap-3 flex-1">
+                    <h3 className="font-black text-navy uppercase text-sm">Caption this dream</h3>
+                    <p className="text-navy/40 text-xs font-medium">Funny, poetic, or absurd. It just has to fit the picture.</p>
+                    <textarea
+                      autoFocus
+                      value={caption}
+                      onChange={(e) => setCaption(e.target.value.slice(0, MAX_CAPTION))}
+                      placeholder="Write a caption..."
+                      rows={3}
+                      className="w-full px-4 py-3 text-navy text-sm focus:outline-none font-medium resize-none"
+                      style={{ border: `3px solid ${COLOR}` }}
+                    />
+                    <p className="text-[10px] text-navy/40 font-bold text-right -mt-2">{caption.length}/{MAX_CAPTION}</p>
+                    <button type="submit" disabled={!caption.trim()} className="btn-brutalist text-white text-sm disabled:opacity-40" style={{ background: COLOR }}>
+                      Submit caption
+                    </button>
+                  </form>
+                )}
+                {phase === 'judging' && <GeneratingSpinner label="The judge is reading your caption..." color={COLOR} />}
+                {phase === 'result' && result && (
+                  <div className="text-center flex flex-col justify-center flex-1 gap-3">
+                    <p className="text-3xl font-black text-primary">+{result.pts} pts</p>
+                    <p className="text-sm text-navy italic">"{caption.trim()}"</p>
+                    {result.score != null ? (
+                      <div className="border-2 border-navy p-3 bg-highlight/20 text-left">
+                        <p className="text-[10px] font-black text-navy/50 uppercase">Judge: {result.score}/100</p>
+                        {result.comment && <p className="text-sm text-navy font-medium">{result.comment}</p>}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-navy/50 font-bold uppercase">Judge unavailable, flat {FALLBACK_POINTS} pts</p>
+                    )}
+                    <p className="text-[11px] text-navy/50 font-bold uppercase">
+                      {result.posted === null ? 'Posting to the gallery...' : result.posted ? 'Posted to the gallery below' : 'Could not post to the gallery'}
+                    </p>
+                    <button onClick={handleNext} className="btn-brutalist bg-navy text-white text-sm">
+                      {round >= MAX_ROUNDS ? 'See final score' : 'Next round'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Gallery */}
-      {gallery.length > 0 && (
-        <div>
-          <h3 className="font-black text-navy uppercase text-sm mb-3">Caption Gallery ({gallery.length})</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {gallery.slice(0, 8).map(entry => (
-              <div key={entry.id} className="brutalist-card p-0 overflow-hidden flex" style={{ height: 140 }}>
-                <GameImage src={entry.imageUrl} alt="" className="w-28 h-full object-cover flex-none" />
-                <div className="p-3 flex flex-col justify-between flex-1 min-w-0">
-                  <p className="text-xs text-navy italic leading-tight line-clamp-3">"{entry.caption}"</p>
-                  <div className="flex items-center justify-between mt-1">
-                    <span className="text-[10px] text-navy/40 font-bold">— {entry.author}</span>
-                    <button onClick={() => handleVote(entry.id)}
-                      title={votedIds.includes(entry.id) ? 'Remove your vote' : 'Vote for this caption'}
-                      className={`text-xs font-black transition-colors ${votedIds.includes(entry.id) ? 'text-primary' : 'text-navy/50 hover:text-primary'}`}>
+      <CaptionGallery gallery={gallery} isMine={isMine} />
+    </div>
+  )
+}
+
+function CaptionGallery({ gallery, isMine }) {
+  const [busy, setBusy] = useState(null)
+  const [voteError, setVoteError] = useState(null)
+  const items = gallery.items.filter((e) => e.text && e.imageUrl)
+
+  const vote = async (id) => {
+    setBusy(id)
+    setVoteError(null)
+    try {
+      await gallery.vote(id)
+    } catch (err) {
+      setVoteError(err?.message || 'Vote failed.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (gallery.loading && items.length === 0) return null
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-3">
+        <h3 className="font-black text-navy uppercase text-sm">Caption gallery ({items.length})</h3>
+        <p className="text-[10px] text-navy/40 font-bold uppercase">Tap ♥ to vote</p>
+      </div>
+      {voteError && <p className="text-xs font-bold text-danger mb-2">{voteError}</p>}
+      {items.length === 0 ? (
+        <p className="text-sm text-navy/40 font-medium">No captions yet. Be the first!</p>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {items.slice(0, 20).map((entry) => {
+            const mine = isMine(entry)
+            return (
+              <div key={entry.id} className="brutalist-card p-0 overflow-hidden flex" style={{ minHeight: 120 }}>
+                <GameImage src={entry.imageUrl} alt="" className="w-28 object-cover flex-none" />
+                <div className="p-3 flex flex-col justify-between flex-1 min-w-0 gap-2">
+                  <p className="text-xs text-navy italic leading-tight line-clamp-4">"{entry.text}"</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] text-navy/40 font-bold truncate">
+                      {entry.avatar || '👤'} {entry.username || 'Guest'}{mine ? ' (you)' : ''}
+                    </span>
+                    <button
+                      onClick={() => vote(entry.id)}
+                      disabled={mine || busy === entry.id}
+                      title={mine ? 'You cannot vote for your own caption' : entry.voted ? 'Remove your vote' : 'Vote for this caption'}
+                      aria-label={mine ? 'Your caption' : entry.voted ? 'Remove vote' : 'Vote'}
+                      className={`text-xs font-black px-2 py-1 border-2 border-navy flex-none disabled:opacity-40 ${entry.voted ? 'bg-primary text-white' : 'bg-white text-navy hover:bg-primary/10'}`}>
                       ♥ {entry.votes || 0}
                     </button>
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
+            )
+          })}
         </div>
       )}
     </div>
+  )
+}
+
+// --------------------------------------------------------------- party ----
+
+function DreamCaptionParty({ gameId }) {
+  return (
+    <SubmitVoteParty
+      gameId={gameId}
+      title="Dream Caption party"
+      color={COLOR}
+      rounds={3}
+      submitSeconds={90}
+      voteSeconds={40}
+      intro="The host makes a dream image each round. Everyone writes a caption on their own phone, then votes for the best one (not their own). +100 per vote, plus a small bonus from the AI judge."
+      pickWaitLabel="The host is dreaming up an image..."
+      renderPick={(props) => <DreamPick key={props.round} {...props} />}
+      renderChallenge={(c, { compact }) => (
+        <div className="mx-auto w-full" style={{ border: '3px solid #1A1A2E', overflow: 'hidden', maxWidth: compact ? 280 : 480 }}>
+          <GameImage eager src={c?.imageUrl} alt="Dream to caption" className="w-full object-cover" />
+        </div>
+      )}
+      renderSubmit={(props) => <CaptionComposer {...props} />}
+      renderEntry={(e) => <p className="text-sm text-navy italic font-medium break-words">"{e.text}"</p>}
+    />
+  )
+}
+
+function DreamPick({ round, onPick }) {
+  const flow = useMachine(dreamPickMachine) // see src/machines/dreamPick.js
+  const [url, setUrl] = useState(null)
+  const [error, setError] = useState(null)
+  const [used, setUsed] = useState([])
+
+  const make = async () => {
+    if (!flow.send('GENERATE')) return
+    setError(null)
+    const p = pickRandom(DREAM_PROMPTS, used)
+    setUsed((u) => [...u, p])
+    try {
+      const next = await generateImage(dreamPrompt(p))
+      if (flow.send('DREAMED')) setUrl(next)
+    } catch (err) {
+      if (flow.send('FAILED')) setError(err?.message || 'Image generation failed.')
+    }
+  }
+
+  return (
+    <div className="brutalist-card p-5 flex flex-col gap-4 items-center text-center" {...flow.attrs}>
+      <h3 className="font-black text-navy uppercase">Round {round}: make the dream</h3>
+      <ErrorBanner message={error} />
+      {flow.is('generating', 'regenerating') ? (
+        <GeneratingSpinner label="Dreaming up something surreal..." color={COLOR} />
+      ) : flow.is('ready') ? (
+        <>
+          <div className="w-full max-w-sm" style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
+            <GameImage eager src={url} alt="Dream preview" className="w-full object-cover" />
+          </div>
+          <div className="grid grid-cols-2 gap-2 w-full max-w-sm">
+            <button onClick={make} className="btn-brutalist bg-white text-navy text-xs">New image</button>
+            <button onClick={() => onPick({ imageUrl: url })} className="btn-brutalist text-white text-xs" style={{ background: COLOR }}>Start captions</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-navy/60 font-medium">You are the host. Make a surreal image for everyone to caption.</p>
+          <button onClick={make} className="btn-brutalist text-white text-sm" style={{ background: COLOR }}>Generate a dream</button>
+        </>
+      )}
+    </div>
+  )
+}
+
+function CaptionComposer({ challenge, onSubmit }) {
+  const flow = useMachine(partyEntryMachine) // see src/machines/partyEntry.js
+  const busy = !flow.is('composing')
+  const [text, setText] = useState('')
+  const alive = useAlive()
+
+  const submit = async (e) => {
+    e.preventDefault()
+    const caption = text.trim()
+    if (!caption || !flow.send('SEND')) return
+    const verdict = await judge('caption', { imageUrl: challenge.imageUrl, text: caption })
+    if (!alive.current || !flow.send('SENT')) return
+    onSubmit({ text: caption, judgeScore: verdict.score, judgeComment: verdict.score != null ? verdict.comment : '' })
+  }
+
+  return (
+    <form onSubmit={submit} className="brutalist-card p-4 flex flex-col gap-3" {...flow.attrs}>
+      <h3 className="font-black text-navy uppercase text-sm">Your caption</h3>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value.slice(0, MAX_CAPTION))}
+        placeholder="Write a caption..."
+        rows={3}
+        disabled={busy}
+        className="w-full px-4 py-3 text-navy text-sm focus:outline-none font-medium resize-none"
+        style={{ border: `3px solid ${COLOR}` }}
+      />
+      <button type="submit" disabled={!text.trim() || busy} className="btn-brutalist text-white text-sm disabled:opacity-40" style={{ background: COLOR }}>
+        {busy ? 'Sending...' : 'Submit caption'}
+      </button>
+    </form>
   )
 }

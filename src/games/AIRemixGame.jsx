@@ -1,11 +1,15 @@
-import { useState, useRef, useEffect } from 'react'
-import { addScore } from '../lib/storage'
+import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { generateImage } from '../lib/fal'
+import { generateImage, editImage, judge } from '../lib/fal'
+import { useGameRounds } from '../hooks/useGameRounds'
 import { useLocalGallery } from '../hooks/useLocalGallery'
+import { useMachine } from '../hooks/useMachine'
+import { aiRemixMachine } from '../machines/aiRemix'
+import StatsBar from '../components/game/StatsBar'
 import ErrorBanner from '../components/game/ErrorBanner'
 import GeneratingSpinner from '../components/game/GeneratingSpinner'
 import GameImage from '../components/game/GameImage'
+import GameOverCard from '../components/game/GameOverCard'
 
 const STARTER_PROMPTS = [
   'A simple red house on a green hill',
@@ -18,231 +22,273 @@ const STARTER_PROMPTS = [
   'A bird perched on a fence post',
 ]
 
+const TWEAK_IDEAS = ['Make it night', 'Add a dragon', 'Turn it into winter', 'Make it underwater', 'Paint it like Van Gogh', 'Add a rainbow']
+
 const STORAGE_KEY = 'ai_arcade_remix_chains'
+const CHANGES = 5
+const PTS_PER_JUDGE_POINT = 1.8 // judge 0-100 -> up to 180 per change, 900 per game
+const FALLBACK_PTS = 50
+const CYAN = '#00D4FF'
+const MAX_TEXT = 200
+
+function pointsFor(score) {
+  return score == null ? FALLBACK_PTS : Math.round(Math.max(0, Math.min(100, score)) * PTS_PER_JUDGE_POINT)
+}
 
 export default function AIRemixGame({ game }) {
   const { user } = useAuth()
   const username = user?.username || 'guest'
-  const [chain, setChain] = useState([])
-  const [currentPrompt, setCurrentPrompt] = useState('')
-  const [phase, setPhase] = useState('start') // start, remixing, generating, viewing
-  const [error, setError] = useState(null)
-  const [score, setScore] = useState(0)
+  const g = useGameRounds({ gameId: game.id, username, maxRounds: CHANGES })
   const { items: savedChains, add: addSavedChain } = useLocalGallery(STORAGE_KEY, { cap: 20, mode: 'prepend' })
-  const [generating, setGenerating] = useState(false)
 
-  const aliveRef = useRef(true)
-  useEffect(() => {
-    aliveRef.current = true
-    return () => { aliveRef.current = false }
-  }, [])
+  const flow = useMachine(aiRemixMachine) // see src/machines/aiRemix.js
+  const phase = flow.state
+  const [steps, setSteps] = useState([]) // [{ text, url, score?, comment?, pts?, judged? }], steps[0] is the starter
+  const [pendingUrl, setPendingUrl] = useState(null)
+  const [draft, setDraft] = useState('')
+  const [custom, setCustom] = useState('')
+  const [error, setError] = useState(null)
 
-  const maxSteps = 6
-
-  const startChain = async (starterPrompt) => {
-    setPhase('generating')
-    setGenerating(true)
+  const start = async (starter) => {
+    const prompt = starter.trim()
+    if (!prompt) return
+    if (!flow.send('START')) return
+    g.restart()
+    const t = g.token()
+    setSteps([])
+    setDraft('')
     setError(null)
     try {
-      const url = await generateImage(starterPrompt)
-      if (!aliveRef.current) return
-      setChain([{ prompt: starterPrompt, url, step: 1 }])
-      setCurrentPrompt('')
-      setPhase('remixing')
+      const url = await generateImage(prompt)
+      if (g.isStale(t)) return
+      if (!flow.send('LOADED')) return
+      setSteps([{ text: prompt, url }])
     } catch {
-      if (!aliveRef.current) return
-      setError('Image generation failed.')
-      setPhase('start')
-    } finally {
-      if (aliveRef.current) setGenerating(false)
+      if (g.isStale(t)) return
+      if (!flow.send('LOAD_FAILED')) return
+      setError('Could not create the starting image. Try again.')
     }
   }
 
-  const handleRemix = async (e) => {
-    e.preventDefault()
-    if (!currentPrompt.trim() || generating) return
-
-    const prevStep = chain[chain.length - 1]
-    const remixPrompt = `${currentPrompt.trim()}, evolved from: ${prevStep.prompt}`
-
-    setGenerating(true)
-    setPhase('generating')
+  const remix = async (e) => {
+    e?.preventDefault()
+    const tweak = draft.trim()
+    if (!tweak) return
+    // One change at a time: a second submit while editing or judging is ignored.
+    if (!flow.send('SUBMIT')) return
+    const before = steps[steps.length - 1]
+    const t = g.token()
     setError(null)
+    let url
     try {
-      const url = await generateImage(remixPrompt)
-      if (!aliveRef.current) return
-      const newStep = { prompt: currentPrompt.trim(), fullPrompt: remixPrompt, url, step: chain.length + 1 }
-      const updated = [...chain, newStep]
-      setChain(updated)
-      setCurrentPrompt('')
-
-      const pts = 50 + (chain.length * 10) // increasing points per step
-      const newScore = score + pts
-      setScore(newScore)
-
-      if (updated.length >= maxSteps) {
-        // Chain complete — award the accumulated total in a single play
-        addScore(game.id, username, newScore, { steps: updated.length })
-        // Save chain
-        const chainEntry = {
-          id: crypto.randomUUID(),
-          steps: updated,
-          author: username,
-        }
-        addSavedChain(chainEntry)
-        setPhase('viewing')
-      } else {
-        setPhase('remixing')
-      }
+      url = await editImage(tweak, before.url)
     } catch {
-      if (!aliveRef.current) return
-      setError('Remix generation failed.')
-      setPhase('remixing')
-    } finally {
-      if (aliveRef.current) setGenerating(false)
+      if (g.isStale(t)) return
+      if (!flow.send('EDIT_FAILED')) return
+      setError('The edit failed. Your change is still in the box, try again.')
+      return
+    }
+    if (g.isStale(t)) return
+    if (!flow.send('EDITED')) return
+    setPendingUrl(url)
+    const verdict = await judge('edit', { beforeUrl: before.url, imageUrl: url, text: tweak })
+    if (g.isStale(t)) return
+    const judged = verdict.score != null
+    const pts = pointsFor(verdict.score)
+    const next = [...steps, { text: tweak, url, score: verdict.score, comment: judged ? verdict.comment : '', pts, judged }]
+    const done = next.length - 1 >= CHANGES
+    if (!flow.send(done ? 'FINISH' : 'JUDGED')) return
+    setSteps(next)
+    setPendingUrl(null)
+    setDraft('')
+    g.recordScore(pts)
+    g.nextRound() // saves the total once, after the last change
+    if (done) {
+      addSavedChain({
+        id: crypto.randomUUID(),
+        steps: next.map((s) => ({ prompt: s.text, url: s.url })),
+        author: username,
+        score: g.totalScore + pts,
+      })
     }
   }
 
-  const newChain = () => {
-    setChain([])
-    setScore(0)
-    setPhase('start')
+  const reset = () => {
+    g.restart()
+    setSteps([])
+    setDraft('')
     setError(null)
+    flow.send('RESTART')
   }
 
-  const latestStep = chain[chain.length - 1]
+  const changesDone = Math.max(0, steps.length - 1)
+  const latest = steps[steps.length - 1]
+  const lastChange = changesDone > 0 ? latest : null
+
+  const strip = steps.length > 1 && (
+    <div className="text-left">
+      <h3 className="font-black text-navy uppercase text-sm mb-2">Evolution</h3>
+      <ol className="flex gap-3 overflow-x-auto pb-2 list-none p-0 m-0">
+        {steps.map((s, i) => (
+          <li key={i} className="flex-none w-32">
+            <div className="relative border-2 border-navy overflow-hidden aspect-square">
+              <GameImage src={s.url} alt={s.text} className="w-full h-full object-cover" />
+              <span className="absolute top-1 left-1 px-1.5 py-0.5 bg-navy text-white text-[10px] font-black">
+                {i === 0 ? 'START' : `#${i}`}
+              </span>
+              {i > 0 && (
+                <span className="absolute bottom-1 right-1 px-1.5 py-0.5 bg-highlight text-navy text-[10px] font-black border border-navy">
+                  +{s.pts}
+                </span>
+              )}
+            </div>
+            <p className="text-[10px] text-navy/70 font-bold mt-1 line-clamp-2">{s.text}</p>
+            {phase === 'over' && s.comment && (
+              <p className="text-[10px] text-navy/50 font-medium italic mt-0.5 line-clamp-3">{s.comment}</p>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+
+  if (phase === 'over') {
+    return (
+      <div className="flex flex-col gap-4" {...flow.attrs}>
+        <GameOverCard emoji="🔄" title="Remix complete!" score={`${g.totalScore} pts`}
+          subtitle={`${CHANGES} changes, from "${steps[0]?.text}" to this.`} onRestart={reset} restartLabel="New remix">
+          {latest && (
+            <div className="max-w-xs mx-auto border-[3px] border-navy overflow-hidden aspect-square mb-4">
+              <GameImage src={latest.url} alt="Final image" className="w-full h-full object-cover" />
+            </div>
+          )}
+          {strip}
+          {steps.slice(1).some((s) => !s.judged) && (
+            <p className="text-xs font-bold text-navy/50 uppercase mt-2">Judge unavailable for some changes: {FALLBACK_PTS} pts each.</p>
+          )}
+        </GameOverCard>
+      </div>
+    )
+  }
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Stats */}
-      <div className="flex items-center justify-between brutalist-card p-4">
-        <div><p className="text-xs font-black text-navy/50 uppercase">Step</p><p className="text-3xl font-black text-navy">{chain.length}/{maxSteps}</p></div>
-        <div className="text-center"><p className="text-xs font-black text-navy/50 uppercase">Evolution</p>
-          <div className="flex gap-1 mt-1">
-            {Array.from({ length: maxSteps }, (_, i) => (
-              <div key={i} className="w-4 h-4" style={{
-                background: i < chain.length ? '#00D4FF' : '#e5e7eb',
-                border: '1px solid #1A1A2E'
-              }} />
-            ))}
-          </div>
-        </div>
-        <div className="text-right"><p className="text-xs font-black text-navy/50 uppercase">Score</p><p className="text-3xl font-black text-primary">{score}</p></div>
-      </div>
+    <div className="flex flex-col gap-4" {...flow.attrs}>
+      <StatsBar stats={[
+        { label: 'Changes', value: `${changesDone}/${CHANGES}` },
+        { label: 'Last', value: lastChange ? `+${lastChange.pts}` : '-', color: CYAN },
+        { label: 'Score', value: g.totalScore, color: '#FF2D55' },
+      ]} />
 
-      <ErrorBanner message={error} />
+      <ErrorBanner message={error} onRetry={phase === 'remix' && draft.trim() ? remix : undefined} />
 
       {phase === 'start' && (
-        <div className="brutalist-card p-6">
-          <div className="text-center mb-6">
-            <p className="text-5xl mb-4">🔄</p>
-            <h3 className="font-black text-navy uppercase mb-2">Start Your Remix Chain</h3>
-            <p className="text-navy/50 text-sm font-medium">Pick a starting image. Then remix it {maxSteps - 1} times to evolve it into something completely different!</p>
+        <div className="brutalist-card p-5 sm:p-6 flex flex-col gap-4">
+          <div className="text-center">
+            <p className="text-5xl mb-3">🔄</p>
+            <h3 className="font-black text-navy uppercase mb-2">Pick a starting image</h3>
+            <p className="text-navy/60 text-sm font-medium">
+              Then make {CHANGES} changes. The AI edits the real image each time, and the judge scores how well each change worked.
+            </p>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {STARTER_PROMPTS.map((p, i) => (
-              <button key={i} onClick={() => startChain(p)}
-                className="p-3 text-left text-xs font-bold text-navy hover:bg-[#00D4FF]/10 transition-colors uppercase"
-                style={{ border: '2px solid #1A1A2E' }}>
+            {STARTER_PROMPTS.map((p) => (
+              <button key={p} onClick={() => start(p)}
+                className="p-3 text-left text-xs font-bold text-navy hover:bg-[#00D4FF]/10 transition-colors uppercase border-2 border-navy">
                 {p}
               </button>
             ))}
           </div>
+          <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); start(custom) }}>
+            <input value={custom} onChange={(e) => setCustom(e.target.value.slice(0, MAX_TEXT))} placeholder="Or write your own start..."
+              aria-label="Your own starting prompt"
+              className="flex-1 min-w-0 px-3 py-2 border-2 border-navy text-navy text-sm font-medium focus:outline-none focus:ring-2 focus:ring-highlight" />
+            <button type="submit" disabled={!custom.trim()} className="btn-brutalist text-navy text-xs disabled:opacity-40" style={{ background: CYAN }}>
+              Go
+            </button>
+          </form>
         </div>
       )}
 
-      {phase === 'generating' && (
-        <GeneratingSpinner
-          label={chain.length === 0 ? 'Creating your starting image...' : `Generating remix #${chain.length + 1}...`}
-          color="#00D4FF"
-        />
+      {phase === 'loading' && <GeneratingSpinner label="Creating your starting image..." color={CYAN} />}
+      {phase === 'editing' && <GeneratingSpinner label={`Editing your image (change ${changesDone + 1}/${CHANGES})...`} color={CYAN} />}
+
+      {phase === 'judging' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="border-[3px] border-navy overflow-hidden aspect-square">
+            <GameImage eager src={pendingUrl} alt="Edited image" className="w-full h-full object-cover" />
+          </div>
+          <GeneratingSpinner label="The judge is looking at your change..." color={CYAN} />
+        </div>
       )}
 
-      {phase === 'remixing' && latestStep && (
+      {phase === 'remix' && latest && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <p className="text-xs font-black text-navy/50 uppercase mb-2">Current — Step {latestStep.step}</p>
-            <div style={{ border: '3px solid #00D4FF', overflow: 'hidden' }}>
-              <GameImage eager src={latestStep.url} alt={`Step ${latestStep.step}`} className="w-full object-cover" style={{ maxHeight: 400 }} />
+            <p className="text-xs font-black text-navy/50 uppercase mb-2">
+              {changesDone === 0 ? 'Your starting image' : `After change ${changesDone}`}
+            </p>
+            <div className="border-[3px] overflow-hidden aspect-square" style={{ borderColor: CYAN }}>
+              <GameImage eager src={latest.url} alt="Current image" className="w-full h-full object-cover" />
             </div>
-            <p className="text-xs text-navy/50 font-medium mt-1">"{latestStep.prompt}"</p>
+            <p className="text-xs text-navy/60 font-medium mt-1">"{latest.text}"</p>
           </div>
-          <div className="brutalist-card p-6 flex flex-col gap-4">
-            <h3 className="font-black text-navy uppercase text-sm">Remix It! (Step {chain.length + 1}/{maxSteps})</h3>
-            <p className="text-navy/40 text-xs font-medium">Describe how to transform or evolve this image. Each remix builds on the last!</p>
-            <form onSubmit={handleRemix} className="flex flex-col gap-3 flex-1">
+          <div className="flex flex-col gap-3">
+            {lastChange && (
+              <div className="p-3 border-2 border-navy bg-highlight/30">
+                <p className="text-[10px] font-black text-navy/50 uppercase">
+                  {lastChange.judged ? `AI judge: ${lastChange.score}/100 · +${lastChange.pts} pts` : `Judge unavailable · +${lastChange.pts} pts`}
+                </p>
+                {lastChange.comment && <p className="text-sm font-bold text-navy">{lastChange.comment}</p>}
+              </div>
+            )}
+            <form onSubmit={remix} className="brutalist-card p-5 flex flex-col gap-3 flex-1">
+              <h3 className="font-black text-navy uppercase text-sm">Change {changesDone + 1} of {CHANGES}</h3>
+              <p className="text-navy/50 text-xs font-medium">Type one change. The AI edits this exact image.</p>
               <textarea
                 autoFocus
-                value={currentPrompt}
-                onChange={(e) => setCurrentPrompt(e.target.value)}
-                placeholder="Add neon lights and make it cyberpunk..."
-                rows={4}
-                className="w-full px-4 py-3 text-navy text-sm focus:outline-none font-medium resize-none flex-1"
-                style={{ border: '3px solid #00D4FF' }}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value.slice(0, MAX_TEXT))}
+                placeholder="Make it night with neon lights..."
+                rows={3}
+                aria-label="Your change"
+                className="w-full px-4 py-3 text-navy text-sm focus:outline-none font-medium resize-none"
+                style={{ border: `3px solid ${CYAN}` }}
               />
-              <button type="submit" disabled={!currentPrompt.trim() || generating}
-                className="w-full py-3 text-white text-sm font-black uppercase disabled:opacity-40"
-                style={{ background: '#00D4FF', border: '2px solid #1A1A2E' }}>
-                Remix (+{50 + chain.length * 10} pts)
+              <div className="flex flex-wrap gap-1.5">
+                {TWEAK_IDEAS.map((idea) => (
+                  <button key={idea} type="button" onClick={() => setDraft(idea)}
+                    className="px-2 py-1 text-[10px] font-black uppercase text-navy border-2 border-navy hover:bg-[#00D4FF]/10">
+                    {idea}
+                  </button>
+                ))}
+              </div>
+              <button type="submit" disabled={!draft.trim()}
+                className="btn-brutalist justify-center text-navy text-sm disabled:opacity-40" style={{ background: CYAN }}>
+                Apply change
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* Evolution timeline */}
-      {chain.length > 1 && phase !== 'start' && (
-        <div>
-          <h3 className="font-black text-navy uppercase text-sm mb-3">Evolution Timeline</h3>
-          <div className="flex gap-2 overflow-x-auto pb-2">
-            {chain.map((step, i) => (
-              <div key={i} className="flex-none relative" style={{ width: 120 }}>
-                <div style={{ border: '2px solid #1A1A2E', overflow: 'hidden', height: 120 }}>
-                  <GameImage src={step.url} alt={`Step ${step.step}`} className="w-full h-full object-cover" />
-                </div>
-                <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-navy text-white text-[10px] font-black">
-                  #{step.step}
-                </div>
-                <p className="text-[10px] text-navy/50 font-medium mt-1 truncate">{step.prompt}</p>
-                {i < chain.length - 1 && (
-                  <div className="absolute top-1/2 -right-2 text-navy font-black text-xs z-10">→</div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {phase !== 'start' && strip}
 
-      {/* Complete chain view */}
-      {phase === 'viewing' && (
-        <div className="brutalist-card p-6 text-center">
-          <p className="text-4xl mb-2">🎉</p>
-          <h3 className="text-xl font-black text-navy uppercase mb-2">Remix Chain Complete!</h3>
-          <p className="text-3xl font-black text-primary mb-1">{score} pts</p>
-          <p className="text-navy/50 text-sm font-medium mb-4">{maxSteps} evolutions from "{chain[0]?.prompt}" to "{chain[chain.length - 1]?.prompt}"</p>
-          <button onClick={newChain}
-            className="px-8 py-3 text-white font-black uppercase text-sm"
-            style={{ background: '#00D4FF', border: '2px solid #1A1A2E' }}>
-            Start New Chain
-          </button>
-        </div>
-      )}
-
-      {/* Saved chains */}
-      {savedChains.length > 0 && phase === 'start' && (
+      {phase === 'start' && savedChains.length > 0 && (
         <div>
-          <h3 className="font-black text-navy uppercase text-sm mb-3">Past Chains ({savedChains.length})</h3>
+          <h3 className="font-black text-navy uppercase text-sm mb-3">Your past remixes ({savedChains.length})</h3>
           <div className="space-y-3">
-            {savedChains.slice(0, 3).map(saved => (
+            {savedChains.slice(0, 3).map((saved) => (
               <div key={saved.id} className="brutalist-card p-3">
                 <div className="flex gap-2 overflow-x-auto">
                   {saved.steps.map((step, i) => (
-                    <div key={i} className="flex-none" style={{ width: 80, height: 80, border: '1px solid #1A1A2E', overflow: 'hidden' }}>
-                      <GameImage src={step.url} alt="" className="w-full h-full object-cover" />
+                    <div key={i} className="flex-none w-20 h-20 border border-navy overflow-hidden">
+                      <GameImage src={step.url} alt={step.prompt || ''} className="w-full h-full object-cover" />
                     </div>
                   ))}
                 </div>
-                <p className="text-[10px] text-navy/40 font-medium mt-2">by {saved.author} · {saved.steps.length} steps</p>
+                <p className="text-[10px] text-navy/50 font-medium mt-2">
+                  by {saved.author} · {saved.steps.length} steps{saved.score != null ? ` · ${saved.score} pts` : ''}
+                </p>
               </div>
             ))}
           </div>

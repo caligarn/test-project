@@ -1,20 +1,17 @@
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useParams, Link, useNavigate, Navigate, useLocation } from 'react-router-dom'
 import { useEffect, lazy, Suspense } from 'react'
 import { ArrowLeft, Coins } from 'lucide-react'
-import { getGame } from '../lib/gameData'
-import { useAuth } from '../context/AuthContext'
-import { isConfigured } from '../lib/fal'
-import { getCredits } from '../lib/storage'
+import { getGame, GAME_ALIASES } from '../lib/gameData'
+import { useCredits } from '../context/CreditContext'
+import { setActiveGame } from '../lib/play'
 import BannerAd from '../components/BannerAd'
 
 const GAME_COMPONENTS = {
   'prompt-off': lazy(() => import('../games/PromptOffGame')),
   'infinimap': lazy(() => import('../games/InfinimapGame')),
   'haiku-canvas': lazy(() => import('../games/HaikuCanvasGame')),
-  'mosaic-maker': lazy(() => import('../games/MosaicGame')),
   'community-comic': lazy(() => import('../games/CommunityComicGame')),
   'prompt-guesser': lazy(() => import('../games/PromptGuesserGame')),
-  'pixel-duel': lazy(() => import('../games/PixelDuelGame')),
   'style-roulette': lazy(() => import('../games/StyleRouletteGame')),
   'speed-prompt': lazy(() => import('../games/SpeedPromptGame')),
   'dream-caption': lazy(() => import('../games/DreamCaptionGame')),
@@ -23,16 +20,25 @@ const GAME_COMPONENTS = {
   'spot-the-fake': lazy(() => import('../games/SpotTheFakeGame')),
   'before-after': lazy(() => import('../games/BeforeAfterGame')),
   'emoji-prompt': lazy(() => import('../games/EmojiPromptGame')),
+  'daily': lazy(() => import('../games/DailyChallengeGame')),
 }
 
 export default function PlayGame() {
   const { gameId } = useParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const location = useLocation()
+  const { credits } = useCredits()
   const game = getGame(gameId)
 
-  // Ensure FAL is configured with default key on mount
-  useEffect(() => { isConfigured() }, [])
+  // AI calls made on this page are charged to this game's play ticket.
+  // Set during render (not in an effect) so it is ready before the game's
+  // own effects run; it is an idempotent module setting.
+  setActiveGame(game?.id || null)
+  useEffect(() => () => setActiveGame(null), [])
+
+  if (GAME_ALIASES[gameId]) {
+    return <Navigate to={`/play/${GAME_ALIASES[gameId]}${location.search}`} replace />
+  }
 
   if (!game) {
     return (
@@ -45,8 +51,6 @@ export default function PlayGame() {
   }
 
   const GameComponent = GAME_COMPONENTS[gameId]
-  const username = user?.username || 'guest'
-  const credits = getCredits(username)
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
@@ -63,10 +67,11 @@ export default function PlayGame() {
           <span className="text-xl">{game.icon}</span>
           <span className="font-black text-navy uppercase">{game.title}</span>
         </div>
-        <div className="flex items-center gap-1 text-xs font-black text-navy/50">
+        <Link to="/subscribe" title="Credits (free credits refill daily)"
+          className="flex items-center gap-1 text-xs font-black text-navy/50 hover:text-navy no-underline">
           <Coins className="w-3.5 h-3.5" />
-          {credits}
-        </div>
+          {credits ? credits.total : '-'}
+        </Link>
       </div>
 
       {/* How to play */}
@@ -88,7 +93,7 @@ export default function PlayGame() {
             </div>
           </div>
         }>
-          <GameComponent game={game} />
+          <GameComponent key={game.id} game={game} />
           <BannerAd slot="inline" className="mt-6" />
         </Suspense>
       ) : (
