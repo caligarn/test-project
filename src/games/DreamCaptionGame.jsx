@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { generateImage, judge } from '../lib/fal'
 import { useGameRounds } from '../hooks/useGameRounds'
@@ -11,6 +11,7 @@ import GameImage from '../components/game/GameImage'
 import GameOverCard from '../components/game/GameOverCard'
 import ModeToggle from './party/ModeToggle'
 import SubmitVoteParty from './party/SubmitVoteParty'
+import { useAlive } from './party/useAlive'
 
 const COLOR = '#8B5CF6'
 const MAX_ROUNDS = 3
@@ -169,7 +170,6 @@ function DreamCaptionSolo({ game }) {
       ) : (
         <>
           <StatsBar
-            className="mb-0"
             stats={[
               { label: 'Round', value: `${round}/${MAX_ROUNDS}` },
               { label: 'Score', value: totalScore, color: '#FF2D55' },
@@ -412,15 +412,4 @@ function CaptionComposer({ challenge, onSubmit }) {
       </button>
     </form>
   )
-}
-
-function useAlive() {
-  const [ref] = useState(() => ({ current: true }))
-  useEffect(() => {
-    ref.current = true
-    return () => {
-      ref.current = false
-    }
-  }, [ref])
-  return ref
 }

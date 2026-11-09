@@ -39,6 +39,9 @@ export const PROMPTS = [
   'A raccoon DJ playing turntables at a rooftop party',
 ]
 
+export const YOU = '#C8FF00' // your side (lime)
+export const THEM = '#FF2D55' // opponent side (pink)
+
 export const BRUSH_COLORS = ['#1A1A2E', '#FF2D55', '#FF6B35', '#FFD600', '#C8FF00', '#00D4FF', '#8B5CF6', '#FFFFFF']
 export const BRUSH_SIZES = [3, 8, 16]
 

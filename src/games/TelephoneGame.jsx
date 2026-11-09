@@ -1,212 +1,32 @@
-import { useState, useRef, useEffect } from 'react'
-import { addScore } from '../lib/storage'
-import { useAuth } from '../context/AuthContext'
-import { generateImage } from '../lib/fal'
-import { promptSimilarity } from '../lib/similarity'
-import StatsBar from '../components/game/StatsBar'
-import ErrorBanner from '../components/game/ErrorBanner'
-import GeneratingSpinner from '../components/game/GeneratingSpinner'
-import GameImage from '../components/game/GameImage'
+import { useState } from 'react'
+import TelephoneSolo from './telephone/TelephoneSolo'
+import TelephoneParty from './telephone/TelephoneParty'
 
-const STARTING_PROMPTS = [
-  'A dragon sleeping on a pile of gold coins in a cave',
-  'A cat wearing a top hat having tea in a garden',
-  'A treehouse in the clouds with a rope ladder',
-  'A penguin surfing a giant wave at sunset',
-  'A wizard casting colorful spells in a dusty library',
-  'A mermaid playing electric guitar underwater',
-  'A dinosaur wearing sunglasses at a pool party',
-  'An owl professor teaching math in a forest classroom',
-  'A fox riding a bicycle through a medieval village',
-  'A cozy cabin in the woods during a heavy snowfall',
-  'A raccoon DJ playing turntables at a rooftop party',
-  'A robot painting a sunset at the beach with an easel',
-  'A pirate ship made of candy sailing on chocolate seas',
-  'A knight jousting a windmill in a sunflower field',
-  'A giant octopus wrapping around a skyscraper at night',
-]
-
-const TOTAL_ROUNDS = 5
+function initialMode() {
+  try {
+    return new URLSearchParams(window.location.search).get('room') ? 'party' : 'solo'
+  } catch {
+    return 'solo'
+  }
+}
 
 export default function TelephoneGame({ game }) {
-  const { user } = useAuth()
-  const username = user?.username || 'guest'
-  const [phase, setPhase] = useState('idle') // idle, generating, describe, result, summary
-  const [chain, setChain] = useState([]) // { type: 'prompt'|'image', value }
-  const [guess, setGuess] = useState('')
-  const [error, setError] = useState(null)
-  const [score, setScore] = useState(0)
-
-  const aliveRef = useRef(true)
-  useEffect(() => {
-    aliveRef.current = true
-    return () => { aliveRef.current = false }
-  }, [])
-
-  const currentRound = Math.floor(chain.length / 2) // each round = prompt + image
-
-  const startGame = async () => {
-    const prompt = STARTING_PROMPTS[Math.floor(Math.random() * STARTING_PROMPTS.length)]
-    setChain([])
-    setPhase('generating')
-    setError(null)
-    setGuess('')
-
-    try {
-      const url = await generateImage(prompt)
-      if (!aliveRef.current) return
-      // Append prompt + image together only once generation succeeded, so a
-      // failure never leaves a half-round in the chain.
-      setChain([{ type: 'prompt', value: prompt }, { type: 'image', value: url }])
-      setPhase('describe')
-    } catch {
-      if (!aliveRef.current) return
-      setError('Image generation failed.')
-      setPhase('idle')
-    }
-  }
-
-  const submitGuess = async () => {
-    const text = guess.trim()
-    if (!text) return
-
-    const roundNum = Math.floor((chain.length + 1) / 2)
-    if (roundNum >= TOTAL_ROUNDS) {
-      // Game done — score based on similarity between first and last prompt
-      const similarity = promptSimilarity(text, chain[0].value)
-      const pts = Math.max(20, similarity * 2)
-      setChain([...chain, { type: 'prompt', value: text }])
-      setGuess('')
-      setScore(pts)
-      addScore(game.id, username, pts, { rounds: TOTAL_ROUNDS, similarity })
-      setPhase('summary')
-      return
-    }
-
-    setPhase('generating')
-    setError(null)
-    try {
-      const url = await generateImage(text)
-      if (!aliveRef.current) return
-      // Only commit the round (prompt + image) once the image exists — keeps
-      // round math intact and never loses the player's text on failure.
-      setChain([...chain, { type: 'prompt', value: text }, { type: 'image', value: url }])
-      setGuess('')
-      setPhase('describe')
-    } catch {
-      if (!aliveRef.current) return
-      setError('Image generation failed. Your description is still below — try again.')
-      setPhase('describe')
-    }
-  }
-
-  const restart = () => {
-    setChain([])
-    setScore(0)
-    setError(null)
-    setGuess('')
-    setPhase('idle')
-  }
-
-  if (phase === 'summary') {
-    return (
-      <div className="flex flex-col gap-4">
-        <div className="brutalist-card p-8 text-center">
-          <p className="text-5xl mb-4">📞</p>
-          <h3 className="text-2xl font-black text-navy uppercase mb-2">Chain Complete!</h3>
-          <p className="text-4xl font-black text-primary mb-2">{score} pts</p>
-          <p className="text-navy/50 text-sm font-medium mb-6">See how your message drifted</p>
-        </div>
-
-        {/* Full chain reveal */}
-        <div className="flex flex-col gap-3">
-          {chain.map((step, i) => (
-            <div key={i} className={`brutalist-card p-4 ${i === 0 ? 'border-l-4 border-l-green-500' : i === chain.length - 1 ? 'border-l-4 border-l-primary' : ''}`}>
-              <p className="text-[10px] font-black text-navy/40 uppercase mb-2">
-                {i === 0 ? 'Original Prompt' : step.type === 'prompt' ? `Round ${Math.ceil(i / 2)} — Description` : `Round ${Math.ceil(i / 2)} — AI Generated`}
-              </p>
-              {step.type === 'prompt' ? (
-                <p className="text-sm text-navy font-medium">"{step.value}"</p>
-              ) : (
-                <div style={{ border: '2px solid #1A1A2E', overflow: 'hidden', maxWidth: 300 }}>
-                  <GameImage src={step.value} alt="" className="w-full object-cover" />
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <button onClick={restart}
-          className="w-full py-3 bg-[#D946EF] text-white font-black uppercase text-sm"
-          style={{ border: '2px solid #1A1A2E' }}>
-          Play Again
-        </button>
-      </div>
-    )
-  }
+  const [mode, setMode] = useState(initialMode)
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Stats */}
-      <StatsBar
-        stats={[
-          { label: 'Round', value: `${Math.min(currentRound + 1, TOTAL_ROUNDS)}/${TOTAL_ROUNDS}` },
-          { label: 'Chain Length', value: chain.length },
-        ]}
-      />
-
-      <ErrorBanner message={error} onRetry={phase === 'describe' && guess.trim() ? submitGuess : undefined} />
-
-      {phase === 'idle' && (
-        <div className="brutalist-card p-12 text-center">
-          <p className="text-5xl mb-4">📞</p>
-          <h3 className="font-black text-navy uppercase mb-2">Telephone</h3>
-          <p className="text-navy/50 text-sm mb-6 font-medium max-w-md mx-auto">
-            A prompt creates an image. You describe the image. That description creates a new image. Repeat {TOTAL_ROUNDS} times and see how far it drifts!
-          </p>
-          <button onClick={startGame}
-            className="px-8 py-3 bg-[#D946EF] text-white font-black uppercase text-sm"
-            style={{ border: '2px solid #1A1A2E' }}>
-            Start Chain
+      <div className="grid grid-cols-2 border-[3px] border-navy" role="tablist" aria-label="Game mode">
+        {[
+          { id: 'solo', label: 'Solo' },
+          { id: 'party', label: 'Party' },
+        ].map((m) => (
+          <button key={m.id} role="tab" aria-selected={mode === m.id} onClick={() => setMode(m.id)}
+            className={`py-2 text-sm font-black uppercase ${mode === m.id ? 'bg-navy text-white' : 'bg-white text-navy hover:bg-navy/5'}`}>
+            {m.label}
           </button>
-        </div>
-      )}
-
-      {phase === 'generating' && (
-        <GeneratingSpinner
-          label={`Generating image... Round ${currentRound + 1} of ${TOTAL_ROUNDS}`}
-          color="#D946EF"
-        />
-      )}
-
-      {phase === 'describe' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <p className="text-[10px] font-black text-navy/40 uppercase mb-2">What do you see?</p>
-            <div style={{ border: '3px solid #1A1A2E', overflow: 'hidden' }}>
-              <GameImage eager src={chain[chain.length - 1]?.value} alt="Describe this" className="w-full object-cover" style={{ maxHeight: 400 }} />
-            </div>
-          </div>
-          <div className="brutalist-card p-6 flex flex-col gap-4">
-            <h3 className="font-black text-navy uppercase text-sm">Describe this image</h3>
-            <p className="text-navy/40 text-xs font-medium">Don't overthink it — describe what you see as clearly as you can.</p>
-            <textarea
-              autoFocus
-              value={guess}
-              onChange={(e) => setGuess(e.target.value)}
-              placeholder="A dragon sleeping on golden coins..."
-              rows={4}
-              className="w-full px-4 py-3 text-navy text-sm focus:outline-none font-medium resize-none flex-1"
-              style={{ border: '3px solid #D946EF' }}
-            />
-            <button onClick={submitGuess} disabled={!guess.trim()}
-              className="w-full py-3 bg-[#D946EF] text-white text-sm font-black uppercase disabled:opacity-40"
-              style={{ border: '2px solid #1A1A2E' }}>
-              {currentRound + 1 >= TOTAL_ROUNDS ? 'Finish Chain' : `Next Round (${currentRound + 1}/${TOTAL_ROUNDS})`}
-            </button>
-          </div>
-        </div>
-      )}
+        ))}
+      </div>
+      {mode === 'solo' ? <TelephoneSolo game={game} /> : <TelephoneParty game={game} />}
     </div>
   )
 }
