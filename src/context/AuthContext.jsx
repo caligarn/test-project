@@ -1,57 +1,95 @@
-import { createContext, useContext, useState, useEffect } from 'react'
-import {
-  getCurrentUser,
-  loginUser,
-  createUser,
-  logoutUser,
-  isSubscribed,
-  getUsers,
-  updateUser,
-} from '../lib/storage'
+import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { api, getSessionToken, setSessionToken } from '../lib/api'
+import { getLegacyUser, removeLegacyUser } from '../lib/storage'
+import { creditsChanged } from '../lib/play'
 
 const AuthContext = createContext(null)
 
+function errorMessage(err) {
+  return err?.message || 'Something went wrong. Try again.'
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
-  const [subscribed, setSubscribed] = useState(false)
+  const [loading, setLoading] = useState(() => Boolean(getSessionToken()))
 
-  useEffect(() => {
-    const u = getCurrentUser()
-    if (u) setUser(u)
-    setSubscribed(isSubscribed())
+  const refreshUser = useCallback(async () => {
+    if (!getSessionToken()) {
+      setUser(null)
+      setLoading(false)
+      return null
+    }
+    try {
+      const { user: u } = await api('/auth/me')
+      setUser(u)
+      return u
+    } catch (err) {
+      if (err.status === 401) {
+        setSessionToken(null)
+        setUser(null)
+      }
+      return null
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
-  function login(username, password) {
-    const result = loginUser(username, password)
-    if (result.success) {
-      setUser(result.user)
-    }
-    return result
+  useEffect(() => {
+    refreshUser()
+  }, [refreshUser])
+
+  function finish({ token, user: u }) {
+    setSessionToken(token)
+    setUser(u)
+    creditsChanged()
+    return { success: true, user: u }
   }
 
-  function signup(username, password, avatar) {
-    const result = createUser(username, password, avatar)
-    if (result.success) {
-      loginUser(username, password)
-      setUser(result.user)
+  async function login(username, password) {
+    try {
+      return finish(await api('/auth/login', { method: 'POST', body: { username, password } }))
+    } catch (err) {
+      // One-time move of an old browser-only account to the server.
+      const legacy = err.code === 'bad_login' ? getLegacyUser(username) : null
+      if (legacy && legacy.password === password) {
+        try {
+          const result = finish(await api('/auth/signup', { method: 'POST', body: { username, password, avatar: legacy.avatar } }))
+          removeLegacyUser(username)
+          return result
+        } catch {
+          // fall through to the original error
+        }
+      }
+      return { error: errorMessage(err) }
     }
-    return result
+  }
+
+  async function signup(username, password, avatar) {
+    try {
+      return finish(await api('/auth/signup', { method: 'POST', body: { username, password, avatar } }))
+    } catch (err) {
+      return { error: errorMessage(err) }
+    }
   }
 
   function logout() {
-    logoutUser()
+    setSessionToken(null)
     setUser(null)
+    creditsChanged()
   }
 
-  function refreshUser() {
-    const u = getCurrentUser()
-    if (u) setUser(u)
+  async function updateAvatar(avatar) {
+    try {
+      const { user: u } = await api('/auth/me', { method: 'PATCH', body: { avatar } })
+      setUser(u)
+      return { success: true }
+    } catch (err) {
+      return { error: errorMessage(err) }
+    }
   }
 
   return (
-    <AuthContext.Provider
-      value={{ user, subscribed, login, signup, logout, refreshUser }}
-    >
+    <AuthContext.Provider value={{ user, loading, login, signup, logout, refreshUser, updateAvatar }}>
       {children}
     </AuthContext.Provider>
   )

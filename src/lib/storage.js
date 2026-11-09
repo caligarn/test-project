@@ -1,189 +1,63 @@
-const USERS_KEY = 'ai_arcade_users'
-const CURRENT_USER_KEY = 'ai_arcade_current_user'
-const SCORES_KEY = 'ai_arcade_scores'
-const SUBSCRIPTION_KEY = 'ai_arcade_subscription'
+// Scores, leaderboards, and small local helpers.
+// Accounts, credits, and leaderboards now live on the server (see api.js).
+// The browser keeps only a local score history, so guests still see their
+// own results on the Profile page.
 
-// User management
-export function getUsers() {
-  return JSON.parse(localStorage.getItem(USERS_KEY) || '{}')
-}
+import { api, getSessionToken } from './api'
+import { getTicket } from './play'
 
-export function createUser(username, password, avatar) {
-  const users = getUsers()
-  if (users[username]) return { error: 'Username already taken' }
+const LOCAL_SCORES_KEY = 'gen_arcade_local_scores'
+const LEGACY_USERS_KEY = 'ai_arcade_users'
 
-  users[username] = {
-    username,
-    password,
-    avatar: avatar || getRandomAvatar(),
-    createdAt: Date.now(),
-    gamesPlayed: 0,
-    totalScore: 0,
-    streak: 0,
-    achievements: [],
+function readJson(key, fallback) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || 'null')
+    return value ?? fallback
+  } catch {
+    return fallback
   }
-  localStorage.setItem(USERS_KEY, JSON.stringify(users))
-  return { success: true, user: users[username] }
 }
-
-export function loginUser(username, password) {
-  const users = getUsers()
-  const user = users[username]
-  if (!user) return { error: 'User not found' }
-  if (user.password !== password) return { error: 'Incorrect password' }
-
-  localStorage.setItem(CURRENT_USER_KEY, username)
-  return { success: true, user }
-}
-
-export function getCurrentUser() {
-  const username = localStorage.getItem(CURRENT_USER_KEY)
-  if (!username) return null
-  const users = getUsers()
-  return users[username] || null
-}
-
-export function logoutUser() {
-  localStorage.removeItem(CURRENT_USER_KEY)
-}
-
-export function updateUser(username, updates) {
-  const users = getUsers()
-  if (!users[username]) return
-  users[username] = { ...users[username], ...updates }
-  localStorage.setItem(USERS_KEY, JSON.stringify(users))
-  return users[username]
-}
-
-// Score management
-export function getScores() {
-  return JSON.parse(localStorage.getItem(SCORES_KEY) || '[]')
-}
-
-export function addScore(gameId, username, score, details = {}) {
-  const scores = getScores()
-  scores.push({
-    gameId,
-    username,
-    score,
-    details,
-    timestamp: Date.now(),
-  })
-  localStorage.setItem(SCORES_KEY, JSON.stringify(scores))
-
-  // Update user stats
-  const user = getCurrentUser()
-  if (user) {
-    updateUser(username, {
-      gamesPlayed: (user.gamesPlayed || 0) + 1,
-      totalScore: (user.totalScore || 0) + score,
-    })
+function writeJson(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // storage full or unavailable: local history is a nice-to-have
   }
 }
 
-export function getLeaderboard(gameId = null, limit = 50) {
-  const scores = getScores()
+/** Local score history for this browser (newest first). */
+export function getLocalScores() {
+  const list = readJson(LOCAL_SCORES_KEY, [])
+  return Array.isArray(list) ? list : []
+}
 
-  const filtered = gameId
-    ? scores.filter((s) => s.gameId === gameId)
-    : scores
-
-  // Aggregate by user - best score per game
-  const userBests = {}
-  filtered.forEach((s) => {
-    const key = gameId ? s.username : `${s.username}`
-    if (!userBests[key] || s.score > userBests[key].score) {
-      userBests[key] = s
-    }
-  })
-
-  if (!gameId) {
-    // Overall: sum of best scores per game per user
-    const userTotals = {}
-    scores.forEach((s) => {
-      if (!userTotals[s.username]) userTotals[s.username] = {}
-      if (
-        !userTotals[s.username][s.gameId] ||
-        s.score > userTotals[s.username][s.gameId]
-      ) {
-        userTotals[s.username][s.gameId] = s.score
-      }
-    })
-
-    return Object.entries(userTotals)
-      .map(([username, games]) => ({
-        username,
-        score: Object.values(games).reduce((a, b) => a + b, 0),
-        gamesPlayed: Object.keys(games).length,
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
+/**
+ * Record a finished game. Logged-in players post to the shared leaderboard
+ * (the server checks the game's play ticket); everyone keeps a local copy.
+ * The `username` argument is kept for old call sites and is not used: the
+ * server takes the name from the session.
+ * Resolves to the server reply ({ best, newBest }) or null for guests/errors.
+ */
+export async function addScore(gameId, _username, score, details = {}) {
+  const entry = { gameId, score: Math.round(score), details, timestamp: Date.now() }
+  writeJson(LOCAL_SCORES_KEY, [entry, ...getLocalScores()].slice(0, 100))
+  if (!getSessionToken()) return null
+  try {
+    return await api('/scores', { method: 'POST', body: { gameId, score: entry.score, details }, ticket: getTicket(gameId) })
+  } catch (err) {
+    console.warn('Score not posted:', err.message)
+    return null
   }
-
-  return Object.values(userBests)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
 }
 
-// Subscription
-export function getSubscription() {
-  return JSON.parse(localStorage.getItem(SUBSCRIPTION_KEY) || 'null')
+/** Shared leaderboard rows: [{ rank, username, score, avatar }]. gameId: id, 'all', or 'daily'. */
+export async function getLeaderboard(gameId = 'all', limit = 50) {
+  const { rows } = await api(`/leaderboard?game=${encodeURIComponent(gameId || 'all')}&limit=${limit}`)
+  return rows
 }
 
-export function setSubscription(plan) {
-  localStorage.setItem(
-    SUBSCRIPTION_KEY,
-    JSON.stringify({
-      plan,
-      startedAt: Date.now(),
-      active: true,
-    })
-  )
-}
+// --- avatars --------------------------------------------------------------
 
-export function isSubscribed() {
-  const sub = getSubscription()
-  return sub && sub.active
-}
-
-// Credits
-const CREDITS_KEY = 'ai_arcade_credits'
-const FREE_DAILY_CREDITS = 3
-const LAST_FREE_CREDITS_KEY = 'ai_arcade_last_free_credits'
-
-export function getCredits(username) {
-  const credits = JSON.parse(localStorage.getItem(CREDITS_KEY) || '{}')
-  if (!credits[username]) credits[username] = 0
-
-  // Award free daily credits
-  const lastFree = JSON.parse(localStorage.getItem(LAST_FREE_CREDITS_KEY) || '{}')
-  const today = new Date().toDateString()
-  if (lastFree[username] !== today) {
-    credits[username] += FREE_DAILY_CREDITS
-    lastFree[username] = today
-    localStorage.setItem(CREDITS_KEY, JSON.stringify(credits))
-    localStorage.setItem(LAST_FREE_CREDITS_KEY, JSON.stringify(lastFree))
-  }
-
-  return credits[username]
-}
-
-export function useCredit(username) {
-  const credits = JSON.parse(localStorage.getItem(CREDITS_KEY) || '{}')
-  if (!credits[username] || credits[username] <= 0) return false
-  credits[username] -= 1
-  localStorage.setItem(CREDITS_KEY, JSON.stringify(credits))
-  return true
-}
-
-export function addCredits(username, amount) {
-  const credits = JSON.parse(localStorage.getItem(CREDITS_KEY) || '{}')
-  credits[username] = (credits[username] || 0) + amount
-  localStorage.setItem(CREDITS_KEY, JSON.stringify(credits))
-  return credits[username]
-}
-
-// Avatars
 const AVATARS = [
   '🤖', '👾', '🎮', '🕹️', '🎯', '🎨', '🧠', '⚡',
   '🔮', '🌟', '🎪', '🎭', '🦊', '🐉', '🦄', '🌈',
@@ -195,4 +69,21 @@ export function getRandomAvatar() {
 
 export function getAvatars() {
   return AVATARS
+}
+
+// --- one-time migration of old browser-only accounts ----------------------
+
+/** Old local account (plain-text password) for this name, if any. */
+export function getLegacyUser(username) {
+  const users = readJson(LEGACY_USERS_KEY, {})
+  return users && typeof users === 'object' ? users[username] || null : null
+}
+
+/** Delete the old local account once it moved to the server. */
+export function removeLegacyUser(username) {
+  const users = readJson(LEGACY_USERS_KEY, {})
+  if (users && users[username]) {
+    delete users[username]
+    writeJson(LEGACY_USERS_KEY, users)
+  }
 }

@@ -1,16 +1,102 @@
-# React + Vite
+# Gen Arcade
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+AI image party games for groups and live events, by Machine Cinema.
+Players write prompts, sketch, caption, and guess. An image model draws, and an
+AI judge scores the results. Many games have a party mode: friends join a room
+from their phones with a code or a QR code.
 
-Currently, two official plugins are available:
+## Games
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+| Game | Solo | Party | How it scores |
+|---|---|---|---|
+| Daily Challenge | yes | | Same 5 images for everyone each day, one guess each, scored on the server, daily leaderboard |
+| Prompt Off | | 2 players + audience | Live sketch-to-image battle, the audience votes by QR code |
+| Prompt Guesser | yes | | Words of the hidden prompt you found + how close the image drawn from your guess looks (AI judge) |
+| Speed Prompt | yes | | AI judge: does your image show the concept, plus a small speed bonus |
+| Style Roulette | yes | | Pick the art style, time and streak bonus |
+| Spot the Fake | yes | | Find the image from a different prompt, time and streak bonus |
+| Dream Caption | yes | yes | Solo: AI judge rates your caption. Party: players vote |
+| Emoji Prompt | yes | yes | Solo: AI judge checks the emoji image shows the scene. Party: players vote |
+| Telephone | yes | yes | Solo: secret start prompt, AI judge measures the drift. Party: chains rotate between players |
+| AI Remix | yes | | Real image edits, AI judge rates each change |
+| Before & After | yes | | Real image edit of a scene, AI judge, shared gallery |
+| Haiku Canvas | yes | | 5-7-5 haiku becomes art, shared gallery with votes |
+| Infini-Map | yes | | One shared canvas for everyone, tile by tile |
+| Community Comic | yes | | One shared comic strip, panel by panel |
 
-## React Compiler
+Pixel Duel was merged into Prompt Guesser, and Mosaic Maker into Infini-Map.
+Their old links redirect.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## How it works
 
-## Expanding the ESLint configuration
+```
+Browser (React + Vite)                 Server (one Vercel function: api/router.js)
+---------------------------            -----------------------------------------------
+src/lib/fal.js  -- /api/generate --->  server/fal.js    fal.ai calls, key stays here
+                -- /api/edit
+                -- /api/judge ------>  server/judge.js  vision model scores 0-100
+src/lib/play.js -- /api/play/start ->  server/economy.js credits, play tickets, rate limits
+src/lib/api.js  -- /api/auth, /scores, /leaderboard, /gallery, /tiles, /daily
+                                       server/store.js  Upstash Redis (or memory locally)
+src/hooks/usePeerRoom.js  <-- PeerJS (WebRTC) -->  other players' browsers
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- **The fal.ai key never reaches the browser.** All AI calls go through `/api`.
+- **Credits are real.** One credit buys a "play ticket" for one game. Each AI image
+  or judge call uses units from the ticket (limits per game in
+  `src/lib/gameLimits.js`), so a credit has a fixed, small cost. Players get free
+  credits every day. The server also limits calls per IP per minute and per day for
+  the whole site, to protect the bill.
+- **Accounts are on the server.** Passwords are hashed with scrypt. Sessions are
+  signed tokens. Old browser-only accounts move to the server on the first login.
+- **Leaderboards, galleries, votes, and the Infini-Map are shared** by all players.
+- **Party modes** use a host-authoritative room over PeerJS. The host's browser
+  keeps the game state. Each player makes their own AI calls with their own credit.
+- **Mock mode:** without `FAL_KEY` in development, the server returns fake SVG
+  images and a fake judge, so you can build and test without spending credit.
+
+## Run locally
+
+```bash
+npm install
+npm run dev
+```
+
+Open http://localhost:5173. With no `.env.local`, images are mocked and data is
+kept in memory (it resets when the dev server restarts). To use real images, copy
+`.env.example` to `.env.local` and set `FAL_KEY`.
+
+```bash
+npm test         # server and logic tests (vitest)
+npm run lint
+npm run build
+```
+
+## Deploy (Vercel)
+
+1. In Vercel, add **Upstash for Redis** from the Marketplace to the project. It sets
+   `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
+2. Set `FAL_KEY` and `SESSION_SECRET` (see `.env.example`). Optional: `REDEEM_CODES`,
+   `FREE_DAILY_CREDITS`, `DAILY_GENERATION_CAP`, Stripe links.
+3. Deploy. `vercel.json` sends every `/api/*` path to the single function
+   `api/router.js` and every other path to the app.
+
+Check `/api/health` after a deploy: it shows if the key and the store are set.
+
+### Security note
+
+An older version of this repository had a fal.ai key in `src/lib/fal.js`. That key
+is still in the git history. **Revoke it in the fal.ai dashboard** and use a new key
+only as the `FAL_KEY` environment variable.
+
+## Project layout
+
+```
+api/router.js            Vercel entry (all /api routes)
+server/                  API: routes, fal.ai, judge, auth, credits, store, mock images
+src/games/               one component per game (party engines in subfolders)
+src/hooks/               useGameRounds, useRoundTimer, usePeerRoom, useSharedGallery
+src/lib/                 api client, fal.js (AI helpers), play tickets, game data
+src/context/             AuthContext (accounts), CreditContext (credits + confirm dialog)
+tests/                   vitest tests for the API and shared logic
+```

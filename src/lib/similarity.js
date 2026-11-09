@@ -16,44 +16,12 @@ export function tokenize(text) {
 }
 
 /**
- * F1-style word-overlap score between two prompts, 0–100.
+ * F1-style word-overlap score between two prompts, 0-100, plus the target
+ * words that matched (for transparent results).
  * Each target word can only be matched once (repeating a guess word earns
  * nothing extra), and fuzzy substring credit requires 4+ characters so
  * fragments like "a" or "cat" inside "catapult" don't score.
  */
-export function promptSimilarity(guess, target) {
-  const guessWords = tokenize(guess)
-  const targetWords = tokenize(target)
-  if (guessWords.length === 0 || targetWords.length === 0) return 0
-
-  const remaining = [...targetWords]
-  let matches = 0
-  const matchedWords = []
-
-  for (const w of guessWords) {
-    let idx = remaining.indexOf(w)
-    let credit = 1
-    if (idx === -1 && w.length >= 4) {
-      idx = remaining.findIndex(
-        (t) => t.length >= 4 && (t.includes(w) || w.includes(t))
-      )
-      credit = 0.5
-    }
-    if (idx !== -1) {
-      matches += credit
-      matchedWords.push(remaining[idx])
-      remaining.splice(idx, 1)
-    }
-  }
-
-  if (matches === 0) return 0
-  const precision = matches / guessWords.length
-  const recall = matches / targetWords.length
-  const f1 = (2 * precision * recall) / (precision + recall)
-  return Math.min(100, Math.round(f1 * 100))
-}
-
-/** Same score, plus the target words that matched (for transparent results). */
 export function promptSimilarityDetail(guess, target) {
   const guessWords = tokenize(guess)
   const targetWords = tokenize(target)
@@ -82,6 +50,11 @@ export function promptSimilarityDetail(guess, target) {
     score = Math.min(100, Math.round(((2 * precision * recall) / (precision + recall)) * 100))
   }
   return { score, matchedWords }
+}
+
+/** Word-overlap score only, 0-100. */
+export function promptSimilarity(guess, target) {
+  return promptSimilarityDetail(guess, target).score
 }
 
 export function shuffle(arr) {

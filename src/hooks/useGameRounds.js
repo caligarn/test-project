@@ -5,7 +5,7 @@ import { addScore } from '../lib/storage'
  * Owns round progression, score accumulation, and stale-async protection for
  * the round-based games.
  *
- * - The total is persisted ONCE, when the last round completes — the
+ * - The total is persisted ONCE, when the last round completes - the
  *   leaderboard ranks whole games, and gamesPlayed increments once per game.
  * - token()/isStale(t) guard async work: capture `const t = token()` before an
  *   await; if `isStale(t)` afterwards, the player restarted/advanced/left and
@@ -25,8 +25,9 @@ export function useGameRounds({ gameId, username, maxRounds }) {
   const roundRef = useRef(1)
 
   useEffect(() => {
+    const ref = tokenRef
     return () => {
-      tokenRef.current++
+      ref.current++
     }
   }, [])
 
