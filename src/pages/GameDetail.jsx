@@ -15,7 +15,7 @@ export default function GameDetail() {
   const navigate = useNavigate()
   const game = getGame(gameId)
   const id = game?.id
-  const [plays, setPlays] = useState(0)
+  const [playCount, setPlayCount] = useState({ id: null, n: 0 })
   const [board, setBoard] = useState({ id: null, rows: [], error: null })
 
   useEffect(() => {
@@ -26,7 +26,7 @@ export default function GameDetail() {
       .catch((err) => { if (active) setBoard({ id, rows: [], error: err.message || 'Could not load scores.' }) })
     if (id !== DAILY.id) {
       api('/stats')
-        .then((data) => { if (active) setPlays(Number(data.plays?.[id]) || 0) })
+        .then((data) => { if (active) setPlayCount({ id, n: Number(data.plays?.[id]) || 0 }) })
         .catch(() => { /* play count is optional */ })
     }
     return () => { active = false }
@@ -49,6 +49,7 @@ export default function GameDetail() {
 
   const isLightBg = game.color === '#C8FF00' || game.color === '#FFD600'
   const isDaily = game.id === DAILY.id
+  const plays = playCount.id === game.id ? playCount.n : 0
   const limits = gameLimits(game.id)
   const loadingBoard = board.id !== game.id
   const leaderboard = loadingBoard ? [] : board.rows
