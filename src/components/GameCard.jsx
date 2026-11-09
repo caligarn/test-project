@@ -1,7 +1,11 @@
 import { Link } from 'react-router-dom'
-import { Users } from 'lucide-react'
+import { Play, Users } from 'lucide-react'
 
-export default function GameCard({ game, size = 'normal' }) {
+/**
+ * One game tile. `plays` is the real play count from GET /stats; the parent
+ * fetches it once for all cards and passes it down. Hidden when 0.
+ */
+export default function GameCard({ game, plays = 0, size = 'normal' }) {
   const isLarge = size === 'large'
   const isLightBg = game.color === '#C8FF00' || game.color === '#FFD600'
 
@@ -18,10 +22,16 @@ export default function GameCard({ game, size = 'normal' }) {
         } flex flex-col justify-between`}
         style={{ backgroundColor: game.color }}
       >
-        <div className="relative z-10">
+        <div className="relative z-10 flex items-start justify-between gap-2">
           <span className={`${isLarge ? 'text-5xl' : 'text-3xl'}`}>
             {game.icon}
           </span>
+          {game.party && (
+            <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-black uppercase bg-white text-navy border-2 border-navy">
+              <Users className="w-3 h-3" />
+              Party
+            </span>
+          )}
         </div>
 
         <div className="relative z-10">
@@ -40,10 +50,12 @@ export default function GameCard({ game, size = 'normal' }) {
             {game.description}
           </p>
           <div className="flex items-center gap-3">
-            <span className={`flex items-center gap-1 ${isLightBg ? 'text-navy/60' : 'text-white/70'} text-xs font-bold`}>
-              <Users className="w-3 h-3" />
-              {game.players}
-            </span>
+            {plays > 0 && (
+              <span className={`flex items-center gap-1 ${isLightBg ? 'text-navy/60' : 'text-white/70'} text-xs font-bold`}>
+                <Play className="w-3 h-3" />
+                {plays.toLocaleString()} {plays === 1 ? 'play' : 'plays'}
+              </span>
+            )}
             <span
               className={`px-2 py-0.5 text-[10px] font-black uppercase border-2 ${
                 game.difficulty === 'Easy'

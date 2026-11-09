@@ -30,7 +30,8 @@ const SUBJECTS = [
   'a medieval castle', 'a bustling cafe', 'a rainy day scene',
 ]
 
-const MAX_ROUNDS = 8
+const MAX_ROUNDS = 5
+// Max per round: 100 + 15s * 2 + streak bonus; about 760 per game (maxScore 1500).
 const BASE_TIME = 15
 
 export default function StyleRouletteGame({ game }) {
@@ -86,7 +87,7 @@ export default function StyleRouletteGame({ game }) {
       startTimer(BASE_TIME)
     } catch {
       if (isStale(t)) return
-      setError('Image generation failed.')
+      setError('Could not make the image. Try again.')
       setPhase('idle')
     }
   }
@@ -159,7 +160,7 @@ export default function StyleRouletteGame({ game }) {
       <ErrorBanner message={error} />
 
       {phase === 'idle' && (
-        <div className="brutalist-card p-12 text-center">
+        <div className="brutalist-card p-8 sm:p-12 text-center">
           <p className="text-5xl mb-4">🎨</p>
           <h3 className="font-black text-navy uppercase mb-2">Round {round}</h3>
           <p className="text-navy/50 text-sm mb-6 font-medium">Identify the art style of the AI-generated image. You have {BASE_TIME} seconds!</p>
