@@ -40,7 +40,7 @@ export function useLocalGallery(storageKey, { cap = 50, mode = 'prepend' } = {})
           setItems(trimmed)
           itemsRef.current = trimmed
         } catch {
-          // Storage unavailable — keep in-memory state so the session still works
+          // Storage unavailable: keep in-memory state so the session still works
         }
       }
     },

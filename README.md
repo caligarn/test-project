@@ -49,6 +49,9 @@ src/hooks/usePeerRoom.js  <-- PeerJS (WebRTC) -->  other players' browsers
   the whole site, to protect the bill.
 - **Accounts are on the server.** Passwords are hashed with scrypt. Sessions are
   signed tokens. Old browser-only accounts move to the server on the first login.
+- **Guests can play.** Each guest browser gets its own free credits (so a room of
+  guests on one event Wi-Fi works), with a per-network cap. Logging in puts scores
+  on the shared leaderboards.
 - **Leaderboards, galleries, votes, and the Infini-Map are shared** by all players.
 - **Party modes** use a host-authoritative room over PeerJS. The host's browser
   keeps the game state. Each player makes their own AI calls with their own credit.
@@ -63,8 +66,12 @@ npm run dev
 ```
 
 Open http://localhost:5173. With no `.env.local`, images are mocked and data is
-kept in memory (it resets when the dev server restarts). To use real images, copy
+kept in memory (it resets when the dev server restarts). Mock images show their
+prompt as text, so guessing games are easy in mock mode. To use real images, copy
 `.env.example` to `.env.local` and set `FAL_KEY`.
+
+To test party modes on one machine, two browser windows (or a normal and a
+private window) can join the same room.
 
 ```bash
 npm test         # server and logic tests (vitest)
@@ -83,6 +90,21 @@ npm run build
 
 Check `/api/health` after a deploy: it shows if the key and the store are set.
 
+### Payments (optional)
+
+Credit packs work with Stripe Payment Links. Set the `VITE_STRIPE_PACK_*` links,
+`STRIPE_SECRET_KEY`, and `STRIPE_CREDITS_BY_LINK`, and add a Stripe webhook to
+`https://<your-site>/api/stripe/webhook` for `checkout.session.completed`. The
+server fetches each event from Stripe to verify it, then adds the credits once.
+Monthly plans (Pro, Team) are not handled yet, so leave their links empty: the
+page shows "Coming soon". Redeem codes (`REDEEM_CODES`) work without Stripe.
+
+### Party modes and PeerJS
+
+Party modes connect browsers directly with WebRTC. By default they use the free
+PeerJS cloud server to find each other. For important events, run your own
+PeerJS server and set the `VITE_PEER_*` variables.
+
 ### Security note
 
 An older version of this repository had a fal.ai key in `src/lib/fal.js`. That key
@@ -94,7 +116,10 @@ only as the `FAL_KEY` environment variable.
 ```
 api/router.js            Vercel entry (all /api routes)
 server/                  API: routes, fal.ai, judge, auth, credits, store, mock images
-src/games/               one component per game (party engines in subfolders)
+src/games/               one component per game
+src/games/party/         shared "submit and vote" party engine (Dream Caption, Emoji Prompt)
+src/games/telephone/     Telephone solo and party
+src/games/promptoff/     Prompt Off networking, live generation, voting, views
 src/hooks/               useGameRounds, useRoundTimer, usePeerRoom, useSharedGallery
 src/lib/                 api client, fal.js (AI helpers), play tickets, game data
 src/context/             AuthContext (accounts), CreditContext (credits + confirm dialog)

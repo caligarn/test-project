@@ -102,7 +102,8 @@ function mockJudge(mode, imageUrls, text) {
   if (mode === 'match-image' || mode === 'drift') score = promptSimilarity(prompts[1], prompts[0])
   else if (mode === 'edit') score = 40 + promptSimilarity(text, prompts[1]) / 2
   else if (mode === 'caption') score = Math.min(95, 30 + text.trim().split(/\s+/).length * 4)
-  else score = promptSimilarity(prompts[0], text) // match-text, emoji
+  else if (mode === 'emoji') score = 35 + (prompts[0].length * 7) % 55 // emoji vs words never overlap: fake a spread
+  else score = promptSimilarity(prompts[0], text) // match-text
   score = Math.max(0, Math.min(100, Math.round(score)))
   return { score, comment: `Mock judge: ${score}/100.`, judged: true, mock: true }
 }

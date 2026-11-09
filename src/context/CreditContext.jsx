@@ -27,6 +27,13 @@ export function CreditProvider({ children }) {
   const [prompt, setPrompt] = useState(null) // { gameId, reason, resolve }
   const [dontAsk, setDontAsk] = useState(false)
   const creditsRef = useRef(null)
+  const dialogRef = useRef(null)
+
+  // Move focus into the dialog (for screen readers and Esc), but onto the box,
+  // not a button: a player typing a prompt must not press "Use 1 credit" by accident.
+  useEffect(() => {
+    if (prompt) dialogRef.current?.focus()
+  }, [prompt])
 
   const refresh = useCallback(async () => {
     try {
@@ -80,7 +87,7 @@ export function CreditProvider({ children }) {
       {children}
       {prompt && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/60 px-4" role="dialog" aria-modal="true" aria-labelledby="credit-title">
-          <div className="brutalist-card bg-white p-6 max-w-sm w-full">
+          <div ref={dialogRef} tabIndex={-1} onKeyDown={(e) => { if (e.key === 'Escape') answer(false) }} className="brutalist-card bg-white p-6 max-w-sm w-full focus:outline-none">
             <div className="flex items-center gap-2 mb-3">
               <Coins className="w-5 h-5 text-navy" />
               <h2 id="credit-title" className="text-lg font-black text-navy uppercase">
@@ -113,7 +120,7 @@ export function CreditProvider({ children }) {
                   Don&apos;t ask me again
                 </label>
                 <div className="flex gap-2">
-                  <button autoFocus onClick={() => answer(true)} className="btn-brutalist bg-primary text-white text-xs">Use 1 credit</button>
+                  <button onClick={() => answer(true)} className="btn-brutalist bg-primary text-white text-xs">Use 1 credit</button>
                   <button onClick={() => answer(false)} className="btn-brutalist bg-white text-navy text-xs">Not now</button>
                 </div>
               </>
