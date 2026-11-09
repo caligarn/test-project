@@ -10,7 +10,7 @@ export const promptOffVoteMachine = defineMachine({
   initial: 'connecting',
   states: {
     connecting: {
-      description: 'Joining the host vote room (gives up after 10 seconds)',
+      description: 'Joining the host vote room; retries the link every 4 seconds, gives up after 15 seconds',
       on: { VOTE_DATA: 'voting', RESULTS: 'results', FAILED: 'error', ROOM_CLOSED: 'error' },
     },
     voting: {

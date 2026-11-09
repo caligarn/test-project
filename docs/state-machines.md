@@ -662,7 +662,7 @@ stateDiagram-v2
 
 | State | Meaning | Events |
 |---|---|---|
-| `connecting` (start) | Joining the host vote room (gives up after 10 seconds) | `VOTE_DATA` to `voting`, `RESULTS` to `results`, `FAILED` to `error`, `ROOM_CLOSED` to `error` |
+| `connecting` (start) | Joining the host vote room; retries the link every 4 seconds, gives up after 15 seconds | `VOTE_DATA` to `voting`, `RESULTS` to `results`, `FAILED` to `error`, `ROOM_CLOSED` to `error` |
 | `voting` | Both images shown; tap one to vote | `VOTE` to `voted`, `RESULTS` to `results`, `FAILED` to `error`, `ROOM_CLOSED` to `closed` |
 | `voted` | Vote sent (one per phone); waiting for the host to reveal | `RESULTS` to `results`, `FAILED` to `error`, `ROOM_CLOSED` to `closed` |
 | `results` (end) | Winner and vote bars shown; kept even if the room closes | none |

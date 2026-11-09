@@ -17,32 +17,51 @@ export function useRoundTimer(onExpire) {
     expireRef.current = onExpire
   })
 
-  const stop = useCallback(() => {
+  // True between start() and stop()/expiry. Survives an effect re-run, so a
+  // hot reload during development resumes the countdown instead of freezing it.
+  const runningRef = useRef(false)
+
+  const clear = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current)
       intervalRef.current = null
     }
   }, [])
 
+  const tick = useCallback(() => {
+    intervalRef.current = setInterval(() => {
+      setTimeLeft((t) => (t == null || t <= 0 ? 0 : t - 1))
+    }, 1000)
+  }, [])
+
+  const stop = useCallback(() => {
+    runningRef.current = false
+    clear()
+  }, [clear])
+
   const start = useCallback(
     (seconds) => {
-      stop()
+      clear()
+      runningRef.current = true
       setTimeLeft(seconds)
-      intervalRef.current = setInterval(() => {
-        setTimeLeft((t) => (t == null || t <= 0 ? 0 : t - 1))
-      }, 1000)
+      tick()
     },
-    [stop]
+    [clear, tick]
   )
 
   useEffect(() => {
-    if (timeLeft === 0 && intervalRef.current) {
+    if (timeLeft === 0 && runningRef.current) {
       stop()
       expireRef.current?.()
     }
   }, [timeLeft, stop])
 
-  useEffect(() => stop, [stop])
+  // Unmount clears the interval. If the effect runs again while a countdown
+  // is still running (React Fast Refresh), it picks the countdown back up.
+  useEffect(() => {
+    if (runningRef.current && !intervalRef.current) tick()
+    return clear
+  }, [tick, clear])
 
   return { timeLeft, start, stop }
 }

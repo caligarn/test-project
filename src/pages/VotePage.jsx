@@ -9,7 +9,8 @@ import GameImage from '../components/game/GameImage'
 
 const A_COLOR = '#C8FF00'
 const B_COLOR = '#FF2D55'
-const CONNECT_TIMEOUT_MS = 10000
+const CONNECT_TIMEOUT_MS = 15000
+const RETRY_MS = 4000
 
 function Centered({ children, ...attrs }) {
   return (
@@ -76,18 +77,27 @@ export default function VotePage() {
       if (!disposed) send('FAILED')
     }
     const peer = createPeer()
+    // Joining = own peer opens, link to the host opens, first vote data
+    // arrives. If the data does not come, try a fresh link (a crowded network
+    // can drop the first message); give up after CONNECT_TIMEOUT_MS.
+    let gotData = false
+    let retryTimer = null
+    const giveUp = setTimeout(() => {
+      if (!gotData) fail()
+    }, CONNECT_TIMEOUT_MS)
+    timer = giveUp
 
-    peer.on('open', () => {
+    const connect = () => {
       if (disposed) return
       const conn = peer.connect(`promptoff-vote-${code.toUpperCase()}`, { reliable: true })
       connRef.current = conn
       conn.on('open', () => {
-        clearTimeout(timer)
         conn.send({ type: 'viewer-hello' })
       })
       conn.on('data', (msg) => {
-        if (disposed || !msg) return
+        if (disposed || !msg || connRef.current !== conn) return
         if (msg.type === 'vote-data') {
+          gotData = true
           setData({
             prompt: msg.prompt || '',
             imageA: msg.imageA,
@@ -99,23 +109,37 @@ export default function VotePage() {
           // moves on from connecting, so a cast vote is kept.
           send('VOTE_DATA')
         } else if (msg.type === 'vote-results' && msg.results) {
+          gotData = true
           setResults(msg.results)
           send('RESULTS')
         }
       })
       conn.on('close', () => {
-        if (!disposed) send('ROOM_CLOSED')
+        // A link we replaced while retrying is not the room closing.
+        if (!disposed && connRef.current === conn && gotData) send('ROOM_CLOSED')
       })
-      conn.on('error', () => fail())
-      timer = setTimeout(() => {
-        if (!conn.open) fail()
-      }, CONNECT_TIMEOUT_MS)
-    })
+      conn.on('error', () => {
+        if (connRef.current === conn && gotData) fail()
+      })
+      clearTimeout(retryTimer)
+      retryTimer = setTimeout(() => {
+        if (disposed || gotData) return
+        try {
+          conn.close()
+        } catch {
+          // ignore
+        }
+        connect()
+      }, RETRY_MS)
+    }
+
+    peer.on('open', () => connect())
     peer.on('error', () => fail())
 
     return () => {
       disposed = true
       clearTimeout(timer)
+      clearTimeout(retryTimer)
       connRef.current = null
       try {
         peer.destroy()
