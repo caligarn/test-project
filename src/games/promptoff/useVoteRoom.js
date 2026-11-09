@@ -6,17 +6,16 @@ import { useLatestRef } from './useLatestRef'
 const NO_VOTES = { A: 0, B: 0 }
 
 /**
- * The host's audience voting room. While `active`, it owns peer id
+ * The host's audience voting room. While `active` (for match `matchId`), it owns peer id
  * `promptoff-vote-<code>` (a fresh code each match), sends `voteData` to every
  * viewer (again whenever it changes) and counts one vote per viewer.
  * onReady(code) runs once the room is reachable, so the guest can show it too.
  * close() ends voting, sends the results to all viewers and returns them.
  */
-export function useVoteRoom({ active, voteData, onReady }) {
-  const [code, setCode] = useState('')
-  const [votes, setVotes] = useState(NO_VOTES)
-  const [viewers, setViewers] = useState(0)
-  const [closed, setClosed] = useState(false)
+export function useVoteRoom({ active, matchId, voteData, onReady }) {
+  // Tagged with the match, so values from an earlier match never show.
+  const [room, setRoom] = useState({ matchId: null, code: '', votes: NO_VOTES, viewers: 0, closed: false })
+  const update = useCallback((id, patch) => setRoom((r) => (r.matchId === id ? { ...r, ...patch } : r)), [])
   const connsRef = useRef([])
   const votesRef = useRef(NO_VOTES)
   const closedRef = useRef(false)
@@ -35,10 +34,7 @@ export function useVoteRoom({ active, voteData, onReady }) {
 
     peer.on('open', () => {
       if (disposed) return
-      setCode(roomCode)
-      setVotes(NO_VOTES)
-      setViewers(0)
-      setClosed(false)
+      setRoom({ matchId, code: roomCode, votes: NO_VOTES, viewers: 0, closed: false })
       latest.current.onReady?.(roomCode)
     })
 
@@ -46,11 +42,9 @@ export function useVoteRoom({ active, voteData, onReady }) {
       conn.on('open', () => {
         if (disposed) return
         conns.push(conn)
-        setViewers(conns.length)
-        if (closedRef.current) {
-          conn.send({ type: 'vote-data', ...latest.current.voteData })
-          conn.send({ type: 'vote-results', results: { votesA: votesRef.current.A, votesB: votesRef.current.B } })
-        } else conn.send({ type: 'vote-data', ...latest.current.voteData })
+        update(matchId, { viewers: conns.length })
+        conn.send({ type: 'vote-data', ...latest.current.voteData })
+        if (closedRef.current) conn.send({ type: 'vote-results', results: { votesA: votesRef.current.A, votesB: votesRef.current.B } })
       })
       conn.on('data', (msg) => {
         if (disposed || closedRef.current) return
@@ -58,13 +52,13 @@ export function useVoteRoom({ active, voteData, onReady }) {
         if (voted.has(conn.peer)) return
         voted.add(conn.peer)
         votesRef.current = { ...votesRef.current, [msg.vote]: votesRef.current[msg.vote] + 1 }
-        setVotes(votesRef.current)
+        update(matchId, { votes: votesRef.current })
       })
       conn.on('close', () => {
         const idx = conns.indexOf(conn)
         if (idx === -1) return
         conns.splice(idx, 1)
-        if (!disposed) setViewers(conns.length)
+        if (!disposed) update(matchId, { viewers: conns.length })
       })
     })
 
@@ -79,7 +73,7 @@ export function useVoteRoom({ active, voteData, onReady }) {
         // ignore
       }
     }
-  }, [active, latest])
+  }, [active, matchId, latest, update])
 
   // Final images can land after viewers joined: send them the update.
   useEffect(() => {
@@ -95,17 +89,16 @@ export function useVoteRoom({ active, voteData, onReady }) {
     for (const conn of connsRef.current) {
       if (conn.open) conn.send({ type: 'vote-results', results })
     }
-    setClosed(true)
+    update(matchId, { closed: true })
     return results
-  }, [])
+  }, [matchId, update])
 
-  // Values from an earlier match are hidden until the new room is open.
-  const ready = active && code !== ''
+  const ready = active && room.matchId === matchId
   return {
-    code: ready ? code : '',
-    votes: ready ? votes : NO_VOTES,
-    viewers: ready ? viewers : 0,
-    closed: ready && closed,
+    code: ready ? room.code : '',
+    votes: ready ? room.votes : NO_VOTES,
+    viewers: ready ? room.viewers : 0,
+    closed: ready && room.closed,
     close,
   }
 }

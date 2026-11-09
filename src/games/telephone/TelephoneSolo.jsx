@@ -147,7 +147,7 @@ export default function TelephoneSolo({ game }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <StatsBar className="!mb-0" stats={[
+      <StatsBar stats={[
         { label: 'Step', value: `${phase === 'idle' ? 0 : step}/${SOLO_STEPS}` },
         { label: 'Images', value: images.length },
         { label: 'Secret', value: '???', color: PINK },

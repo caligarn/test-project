@@ -58,7 +58,7 @@ const firstUnplayed = (rounds, played) => {
 }
 
 export default function DailyChallengeGame() {
-  const { user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
   const [data, setData] = useState(null) // { date, rounds, played }
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
@@ -185,6 +185,12 @@ export default function DailyChallengeGame() {
           <p className="text-xl sm:text-3xl font-black text-primary">{total}</p>
         </div>
       </div>
+
+      {!user && !authLoading && !done && (
+        <p className="text-sm text-navy font-medium p-3 bg-highlight/20 border-2 border-highlight">
+          Playing as a guest. <Link to="/login" className="font-black text-primary uppercase">Log in</Link> to appear on today's leaderboard.
+        </p>
+      )}
 
       {/* Image strip */}
       <div className="grid grid-cols-5 gap-2">
@@ -340,7 +346,7 @@ export default function DailyChallengeGame() {
             {!user && (
               <p className="text-sm text-navy font-medium mb-3 p-3 bg-highlight/20 border-2 border-highlight">
                 You played as a guest, so your score is not on the leaderboard.{' '}
-                <Link to="/login" className="font-black text-primary uppercase">Log in</Link> before you play to get on it tomorrow.
+                <Link to="/login" className="font-black text-primary uppercase">Log in</Link> to appear on it next time.
               </p>
             )}
             {boardError && <ErrorBanner message={boardError} onRetry={loadBoard} />}
