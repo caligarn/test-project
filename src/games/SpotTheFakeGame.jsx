@@ -10,43 +10,28 @@ import GeneratingSpinner from '../components/game/GeneratingSpinner'
 import ErrorBanner from '../components/game/ErrorBanner'
 import GameImage from '../components/game/GameImage'
 
-const PROMPTS = [
-  'A castle on top of a mountain at sunset',
-  'A cat sitting on a windowsill watching rain',
-  'A robot walking through a field of flowers',
-  'An underwater city with glowing buildings',
-  'A treehouse village connected by rope bridges',
-  'A spaceship landing on a purple planet',
-  'A fox curled up by a campfire in the snow',
-  'A dragon flying over a medieval town',
-  'A library with books floating in the air',
-  'A lighthouse in a storm with crashing waves',
-  'A garden made entirely of crystals',
-  'A train traveling through the clouds',
-  'A bear fishing in a mountain stream',
-  'A wizard tower surrounded by stars',
-  'An enchanted forest with glowing mushrooms',
+// Each round: three images of `real` and one of `fake`, a slightly different
+// prompt (one key detail changed), as the game description promises.
+const ROUNDS = [
+  { real: 'A castle on top of a mountain at sunset', fake: 'A castle on top of a mountain in a snowstorm' },
+  { real: 'A cat sitting on a windowsill watching rain', fake: 'A dog sitting on a windowsill watching rain' },
+  { real: 'A robot walking through a field of flowers', fake: 'A robot walking through a field of snow' },
+  { real: 'An underwater city with glowing buildings', fake: 'An underwater city of dark ruins' },
+  { real: 'A treehouse village connected by rope bridges', fake: 'A treehouse village on fire at night' },
+  { real: 'A spaceship landing on a purple planet', fake: 'A spaceship landing on a green ocean planet' },
+  { real: 'A fox curled up by a campfire in the snow', fake: 'A fox curled up by a campfire on a sunny beach' },
+  { real: 'A dragon flying over a medieval town', fake: 'A hot air balloon flying over a medieval town' },
+  { real: 'A library with books floating in the air', fake: 'A library with fish swimming in the air' },
+  { real: 'A lighthouse in a storm with crashing waves', fake: 'A lighthouse on a calm sunny day' },
+  { real: 'A garden made entirely of crystals', fake: 'A garden made entirely of candy' },
+  { real: 'A train traveling through the clouds', fake: 'A train traveling through a desert' },
+  { real: 'A bear fishing in a mountain stream', fake: 'A bear playing guitar by a mountain stream' },
+  { real: 'A wizard tower surrounded by stars', fake: 'A wizard tower surrounded by sunflowers' },
+  { real: 'An enchanted forest with glowing mushrooms', fake: 'An enchanted forest with glowing jellyfish' },
 ]
 
-const FAKE_PROMPTS = [
-  'A peaceful beach with palm trees and hammock',
-  'A busy city street at night with neon signs',
-  'A hot air balloon festival at sunrise',
-  'A snowy mountain peak with an eagle',
-  'A carnival with a ferris wheel at dusk',
-  'A vintage car on a desert highway',
-  'A waterfall in a tropical jungle',
-  'A pirate ship on calm waters',
-  'A cottage garden with butterflies',
-  'A night sky full of shooting stars',
-  'A sushi restaurant interior, Japanese style',
-  'A roller coaster at an amusement park',
-  'A cozy coffee shop with bookshelves',
-  'A submarine exploring deep ocean trenches',
-  'A medieval market with merchants and stalls',
-]
-
-const MAX_ROUNDS = 6
+const MAX_ROUNDS = 5
+// Max per round: 100 + 20s * 3 + streak bonus; at most 900 per game (maxScore 1500).
 const TIME_PER_ROUND = 20
 
 export default function SpotTheFakeGame({ game }) {
@@ -60,8 +45,8 @@ export default function SpotTheFakeGame({ game }) {
   const [selected, setSelected] = useState(null)
   const [roundPts, setRoundPts] = useState(0)
   const [error, setError] = useState(null)
-  const [usedPrompts, setUsedPrompts] = useState([])
-  const [usedFakes, setUsedFakes] = useState([])
+  const [usedRounds, setUsedRounds] = useState([])
+  const [pair, setPair] = useState(null)
 
   const { timeLeft, start: startTimer, stop: stopTimer } = useRoundTimer(() => {
     // Time ran out
@@ -78,13 +63,13 @@ export default function SpotTheFakeGame({ game }) {
     setError(null)
     setSelected(null)
 
-    // Pick a real prompt and a fake prompt
-    const realPrompt = pickRandom(PROMPTS, usedPrompts)
-    const fakePrompt = pickRandom(FAKE_PROMPTS, usedFakes)
+    const picked = pickRandom(ROUNDS, usedRounds)
+    const realPrompt = picked.real
+    const fakePrompt = picked.fake
 
     const t = token()
     try {
-      // 3 variations of the real prompt + 1 fake — 2 requests instead of 4
+      // 3 variations of the real prompt + 1 fake: 2 requests instead of 4
       const [realUrls, fakeUrl] = await Promise.all([
         generateImageVariations(realPrompt, 3),
         generateImage(fakePrompt),
@@ -100,14 +85,14 @@ export default function SpotTheFakeGame({ game }) {
       if (isStale(t)) return
 
       // Only consume the prompts once generation succeeded
-      setUsedPrompts(prev => [...prev, realPrompt])
-      setUsedFakes(prev => [...prev, fakePrompt])
+      setUsedRounds(prev => [...prev, picked])
+      setPair(picked)
       setImages(items)
       setPhase('playing')
       startTimer(TIME_PER_ROUND)
     } catch {
       if (isStale(t)) return
-      setError('Image generation failed.')
+      setError('Could not make the images. Try again.')
       setPhase('idle')
     }
   }
@@ -143,8 +128,8 @@ export default function SpotTheFakeGame({ game }) {
     setSelected(null)
     setRoundPts(0)
     setError(null)
-    setUsedPrompts([])
-    setUsedFakes([])
+    setUsedRounds([])
+    setPair(null)
     setPhase('idle')
   }
 
@@ -166,7 +151,7 @@ export default function SpotTheFakeGame({ game }) {
 
   const stats = [
     { label: 'Round', value: `${round}/${MAX_ROUNDS}` },
-    { label: 'Streak', value: streak > 0 ? `🔥 ${streak}` : '—' },
+    { label: 'Streak', value: streak > 0 ? `🔥 ${streak}` : '-' },
     ...(phase === 'playing' && timeLeft !== null
       ? [{ label: 'Time', value: `${timeLeft}s`, color: timerColor }]
       : []),
@@ -180,11 +165,11 @@ export default function SpotTheFakeGame({ game }) {
       <ErrorBanner message={error} />
 
       {phase === 'idle' && (
-        <div className="brutalist-card p-12 text-center">
+        <div className="brutalist-card p-8 sm:p-12 text-center">
           <p className="text-5xl mb-4">🕵️</p>
           <h3 className="font-black text-navy uppercase mb-2">Round {round}</h3>
           <p className="text-navy/50 text-sm mb-6 font-medium max-w-md mx-auto">
-            Four images — three share the same prompt, one is the imposter. Find the fake!
+            Four images: three share the same prompt, one has a small twist. Find the fake!
           </p>
           <button onClick={startRound}
             className="px-8 py-3 bg-[#0D9488] text-white font-black uppercase text-sm"
@@ -240,6 +225,12 @@ export default function SpotTheFakeGame({ game }) {
                 <p className="text-lg font-black text-red-500 mb-3">
                   {selected === -1 ? 'Time ran out!' : 'That was a real one!'} 0 pts
                 </p>
+              )}
+              {pair && (
+                <div className="text-left max-w-md mx-auto mb-3 space-y-1 text-sm">
+                  <p className="font-medium text-navy"><span className="text-xs font-black text-navy/50 uppercase">Real: </span>{pair.real}</p>
+                  <p className="font-medium text-navy"><span className="text-xs font-black text-green-600 uppercase">Fake: </span>{pair.fake}</p>
+                </div>
               )}
               <button onClick={handleNextRound}
                 className="px-8 py-3 bg-navy text-white font-black uppercase text-sm"

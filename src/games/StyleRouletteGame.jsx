@@ -31,7 +31,7 @@ const SUBJECTS = [
 ]
 
 const MAX_ROUNDS = 5
-// Max per round: 100 + 15s * 2 + streak bonus; about 760 per game (maxScore 1500).
+// Max per round: 100 + 15s * 2 + streak bonus; at most 700 per game (maxScore 1500).
 const BASE_TIME = 15
 
 export default function StyleRouletteGame({ game }) {
